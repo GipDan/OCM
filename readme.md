@@ -149,6 +149,7 @@ streamlit run app.py
 | **导出 CSV** | 选择 `(op_name, device)` 与 **feature_order_key 范围**（全部 / 仅未标注 / 某一 key）。CSV 含 `record_id`、`feature_order_key` 与展平后的参数列。 |
 | **模型干预** | 粘贴离线得到的 `model_payload`（`booster.save_raw('json')` 的文本）与 **`feature_order`**（JSON 字符串数组），覆盖数据库中的模型。 |
 | **推理试算** | 若同一 `(op_name, device)` 存在多个模型，需选择 **feature_order_key** 变体；仅一个模型时可自动选用。支持 params 模板加载与保存。 |
+| **数据管理** | 按条件预览 `records`；按 id 或列表选择后**修改**（params JSON、自动/手动 key、未标注）；**删除**（需确认）。 |
 
 ### 3. Python API 调用示例
 
@@ -156,6 +157,7 @@ streamlit run app.py
 - **录入并自动训练**：`add_record_maybe_autofit(..., auto_fit=True)`，或在多条 `insert_record` 之后调用 `fit_and_store_model(...)`。
 - **params 模板**：`list_param_templates`、`get_param_template_by_name`、`save_param_template`、`delete_param_template`（名称唯一，同名保存则覆盖 `params`）。
 - **多模型 / 特征模式**：`insert_record` 默认从 `params` 自动计算 `feature_order_key`（`derive_feature_order_key_from_params`），返回 `(row_id, key)`；`fit_and_store_model(..., feature_order_key=...)` 或 `unlabeled_only=True`；`predict_latency(..., feature_order_key=...)`；`list_models_for_op_device`、`get_model_row`、`make_feature_order_key`。
+- **记录维护**：`list_records`、`get_record_by_id`、`update_record`、`delete_record`。
 
 在**项目根目录**下将当前目录加入 `PYTHONPATH`，或使用 `pip install -e .`（若已配置可编辑安装）后导入 `ocm`：
 

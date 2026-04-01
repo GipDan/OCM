@@ -200,6 +200,111 @@ def fetch_records(
     return out
 
 
+def get_record_by_id(
+    conn: sqlite3.Connection, record_id: int
+) -> dict[str, Any] | None:
+    r = conn.execute(
+        """
+        SELECT id, op_name, device, params, latency, feature_order_key
+        FROM records WHERE id = ?
+        """,
+        (record_id,),
+    ).fetchone()
+    if r is None:
+        return None
+    return {
+        "id": r["id"],
+        "op_name": r["op_name"],
+        "device": r["device"],
+        "params": json.loads(r["params"]),
+        "latency": r["latency"],
+        "feature_order_key": r["feature_order_key"],
+    }
+
+
+def list_records(
+    conn: sqlite3.Connection,
+    *,
+    op_name: str | None = None,
+    device: str | None = None,
+    limit: int = 2000,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List records with optional filters, newest id first."""
+    q = """
+        SELECT id, op_name, device, params, latency, feature_order_key
+        FROM records WHERE 1=1
+    """
+    args: list[Any] = []
+    if op_name is not None and str(op_name).strip() != "":
+        q += " AND op_name = ?"
+        args.append(op_name.strip())
+    if device is not None and str(device).strip() != "":
+        q += " AND device = ?"
+        args.append(device.strip())
+    q += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    args.extend([limit, offset])
+    rows = conn.execute(q, args).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "id": r["id"],
+                "op_name": r["op_name"],
+                "device": r["device"],
+                "params": json.loads(r["params"]),
+                "latency": r["latency"],
+                "feature_order_key": r["feature_order_key"],
+            }
+        )
+    return out
+
+
+def update_record(
+    conn: sqlite3.Connection,
+    record_id: int,
+    op_name: str,
+    device: str,
+    params: dict[str, Any],
+    latency: float,
+    feature_order_key: str | None = None,
+    *,
+    auto_key_from_params: bool = True,
+) -> str | None:
+    """Update a row; returns stored feature_order_key."""
+    from ocm.features import derive_feature_order_key_from_params
+
+    if feature_order_key is not None:
+        fk: str | None = feature_order_key
+    elif auto_key_from_params:
+        fk = derive_feature_order_key_from_params(params)
+    else:
+        fk = None
+    conn.execute(
+        """
+        UPDATE records
+        SET op_name = ?, device = ?, params = ?, latency = ?, feature_order_key = ?
+        WHERE id = ?
+        """,
+        (
+            op_name,
+            device,
+            json.dumps(params, ensure_ascii=False, sort_keys=True),
+            float(latency),
+            fk,
+            record_id,
+        ),
+    )
+    conn.commit()
+    return fk
+
+
+def delete_record(conn: sqlite3.Connection, record_id: int) -> bool:
+    cur = conn.execute("DELETE FROM records WHERE id = ?", (record_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def list_op_device_pairs(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     cur = conn.execute(
         "SELECT DISTINCT op_name, device FROM records ORDER BY op_name, device"
