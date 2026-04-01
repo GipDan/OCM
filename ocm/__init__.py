@@ -2,12 +2,16 @@
 
 from ocm.database import (
     DEFAULT_DB_PATH,
+    delete_param_template,
     get_connection,
+    get_param_template_by_name,
     init_db,
     insert_record,
     list_op_device_pairs,
+    list_param_templates,
     fetch_records,
     get_model_row,
+    save_param_template,
     upsert_model,
 )
 from ocm.features import params_to_feature_row, build_training_matrix
@@ -24,6 +28,10 @@ __all__ = [
     "fetch_records",
     "get_model_row",
     "upsert_model",
+    "list_param_templates",
+    "get_param_template_by_name",
+    "save_param_template",
+    "delete_param_template",
     "params_to_feature_row",
     "build_training_matrix",
     "MIN_SAMPLES_DEFAULT",

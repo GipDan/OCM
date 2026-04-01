@@ -23,7 +23,7 @@
 ---
 
 ## 三、 数据库 Schema 设计 (SQLite)
-系统由两张核心表构成，完全通过文本字段（结合 JSON 格式）实现对无限扩展参数的兼容。
+系统以多张表存储核心数据，完全通过文本字段（结合 JSON 格式）实现对无限扩展参数的兼容。
 
 ### 1. 性能明细表 (`records`)
 用于记录每一次 Benchmark 的原始测试数据，作为模型训练的样本库。
@@ -43,6 +43,16 @@
 | `op_name` | TEXT | 算子标准名称 (Primary Key Part 1) |
 | `device` | TEXT | 目标硬件标识 (Primary Key Part 2) |
 | `model_payload` | TEXT (JSON) | **XGBoost 森林结构的完整 JSON 序列化字符串**。系统不保存任何物理模型文件，推理时直接读取此字符串并反序列化到内存。 |
+| `feature_order` | TEXT (JSON) | 训练时特征列名顺序，推理时与 `params` 对齐。 |
+
+### 3. 参数模板表 (`param_templates`)
+用于在 Web UI 或 API 中复用常用的 `params` JSON，与具体 `records` 无关。
+
+| 字段名 | 数据类型 | 描述说明 |
+| :--- | :--- | :--- |
+| `id` | INTEGER | 自增主键 |
+| `name` | TEXT | 模板名称（唯一） |
+| `params` | TEXT (JSON) | 与 `records.params` 同结构的参数字典 |
 
 ---
 
@@ -126,22 +136,23 @@ conda activate ocm
 streamlit run app.py
 ```
 
-浏览器打开终端提示的本地地址（一般为 `http://localhost:8501`）。侧栏可修改 **SQLite 数据库文件路径**；默认库文件为项目下 **`data/ocm.sqlite3`**（若不存在会在首次写入时自动创建目录与表结构）。
+浏览器打开终端提示的本地地址（一般为 `http://localhost:8501`）。侧栏可修改 **SQLite 数据库文件路径**；默认库文件为项目下 **`data/ocm.sqlite3`**（若不存在会在首次写入时自动创建目录与表结构）。**params 模板**存于当前库文件的 `param_templates` 表，换库即换模板列表。
 
 界面分为多个标签页，建议按下列顺序使用：
 
 | 标签页 | 用途 |
 | :--- | :--- |
-| **录入数据** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）。**录入模式**二选一：**仅写入 records**（不训练），或 **写入后自动训练**（同 `(op_name, device)` 下样本数 ≥ 2 时拟合 XGBoost 并写入 `models`）。 |
+| **录入数据** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）。**录入模式**二选一：**仅写入 records**（不训练），或 **写入后自动训练**（同 `(op_name, device)` 下样本数 ≥ 2 时拟合 XGBoost 并写入 `models`）。可在展开区 **选择模板加载到编辑区**，或将当前 JSON **命名保存为模板**，或删除已有模板。 |
 | **手动训练** | 不新增记录，仅对已有样本组合触发训练。 |
 | **导出 CSV** | 将某一 `(op_name, device)` 的 `records` 展平为 CSV，便于离线清洗与调参。 |
 | **模型干预** | 粘贴离线得到的 `model_payload`（`booster.save_raw('json')` 的文本）与 **`feature_order`**（JSON 字符串数组），覆盖数据库中的模型。 |
-| **推理试算** | 用数据库中的模型预测耗时；也可不经过数据库，手动粘贴 `model_payload` 与 `feature_order` 做试算。 |
+| **推理试算** | 用数据库中的模型预测耗时；也可不经过数据库，手动粘贴 `model_payload` 与 `feature_order` 做试算。支持与本表相同的 **params 模板**加载与保存。 |
 
 ### 3. Python API 调用示例
 
 - **仅录入**：直接调用 `insert_record(...)`，或 `add_record_maybe_autofit(..., auto_fit=False)`（默认即为不训练）。
 - **录入并自动训练**：`add_record_maybe_autofit(..., auto_fit=True)`，或在多条 `insert_record` 之后调用 `fit_and_store_model(...)`。
+- **params 模板**：`list_param_templates`、`get_param_template_by_name`、`save_param_template`、`delete_param_template`（名称唯一，同名保存则覆盖 `params`）。
 
 在**项目根目录**下将当前目录加入 `PYTHONPATH`，或使用 `pip install -e .`（若已配置可编辑安装）后导入 `ocm`：
 
@@ -172,4 +183,4 @@ conn.close()
 
 ### 4. 测试目录说明
 
-`test/OCMv1.py` 为可选入口脚本（将项目根加入 `sys.path` 后可配合 `streamlit run app.py` 使用）；架构说明与操作指引以本文 **`test/readme.md`** 为准。
+`test/OCMv1.py` 为可选入口脚本（将项目根加入 `sys.path` 后可配合 `streamlit run app.py` 使用）；架构说明与操作指引以仓库根目录 **`readme.md`**（本文）为准。

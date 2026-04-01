@@ -19,15 +19,21 @@ if str(ROOT) not in sys.path:
 
 from ocm.database import (  # noqa: E402
     DEFAULT_DB_PATH,
+    delete_param_template,
     export_records_flat_csv_rows,
     get_connection,
+    get_param_template_by_name,
     init_db,
     list_op_device_pairs,
+    list_param_templates,
+    save_param_template,
     upsert_model,
 )
 from ocm.inference import predict_latency, predict_with_booster_json  # noqa: E402
 from ocm.train import fit_and_store_model  # noqa: E402
 from ocm.workflow import add_record_maybe_autofit  # noqa: E402
+
+_DEFAULT_PARAMS_JSON = '{"N":1,"C":64,"H":32,"W":32,"is_contiguous":true,"memory_stride":[64,1]}'
 
 
 def main() -> None:
@@ -40,6 +46,13 @@ def main() -> None:
         conn = get_connection(db_path)
         init_db(conn)
         st.caption("零文件架构：模型以 JSON 文本存于 `models.model_payload`。")
+        n_tpl = len(list_param_templates(conn))
+        st.caption(f"已保存 params 模板数：{n_tpl}（与当前库文件绑定）")
+
+    if "record_params" not in st.session_state:
+        st.session_state.record_params = _DEFAULT_PARAMS_JSON
+    if "infer_params" not in st.session_state:
+        st.session_state.infer_params = _DEFAULT_PARAMS_JSON
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
         ["录入数据", "手动训练", "导出 CSV", "模型干预", "推理试算"]
@@ -58,20 +71,74 @@ def main() -> None:
             help="仅写入适合先批量攒数据；自动训练会在每次提交后尝试用当前该算子+设备下的全部样本更新模型。",
         )
         auto_fit = mode.startswith("写入 records 后")
+
+        with st.expander("params 模板（可选）：从库中加载或保存当前编辑区内容", expanded=False):
+            tpls = list_param_templates(conn)
+            names = [t["name"] for t in tpls]
+            r1, r2, r3 = st.columns([2, 1, 1])
+            with r1:
+                pick_r = st.selectbox("选择模板", ["—"] + names, key="tpl_pick_record")
+            with r2:
+                st.write("")
+                if st.button("加载到编辑区", key="btn_tpl_load_record"):
+                    if pick_r != "—":
+                        t = get_param_template_by_name(conn, pick_r)
+                        if t:
+                            st.session_state.record_params = json.dumps(
+                                t["params"], ensure_ascii=False, separators=(",", ":")
+                            )
+                            st.rerun()
+            with r3:
+                st.write("")
+            sn1, sn2 = st.columns([3, 1])
+            with sn1:
+                st.text_input(
+                    "将当前 params 保存为模板（填写名称后点右侧按钮）",
+                    key="tpl_save_name_record",
+                    placeholder="例如 conv3x3_fp32_baseline",
+                )
+            with sn2:
+                st.write("")
+                st.write("")
+                if st.button("保存为模板", key="btn_tpl_save_record"):
+                    try:
+                        p = json.loads(st.session_state.record_params)
+                        if not isinstance(p, dict):
+                            raise ValueError("params 必须是 JSON 对象")
+                        nm = (st.session_state.get("tpl_save_name_record") or "").strip()
+                        if not nm:
+                            raise ValueError("请填写模板名称")
+                        save_param_template(conn, nm, p)
+                        st.success(f"已保存模板「{nm}」")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+            if names:
+                d1, d2 = st.columns([2, 1])
+                with d1:
+                    del_r = st.selectbox("删除模板", ["—"] + names, key="tpl_del_pick_record")
+                with d2:
+                    st.write("")
+                    if st.button("删除所选", key="btn_tpl_del_record"):
+                        if del_r != "—":
+                            delete_param_template(conn, del_r)
+                            st.success(f"已删除「{del_r}」")
+                            st.rerun()
+
         c1, c2 = st.columns(2)
         with c1:
             op_name = st.text_input("op_name", value="nn::conv2d_nchw_fp32")
             device = st.text_input("device", value="NVIDIA_RTX_4090")
         with c2:
-            params_json = st.text_area(
+            st.text_area(
                 "params (JSON)",
-                value='{"N": 1, "C": 64, "H": 32, "W": 32, "is_contiguous": true, "memory_stride": [64, 1]}',
                 height=160,
+                key="record_params",
             )
             latency = st.number_input("latency (ms)", min_value=0.0, value=1.452, format="%.6f")
         if st.button("提交"):
             try:
-                params = json.loads(params_json)
+                params = json.loads(st.session_state.record_params)
                 if not isinstance(params, dict):
                     raise ValueError("params 必须是 JSON 对象")
                 rid, fit_res = add_record_maybe_autofit(
@@ -153,15 +220,57 @@ def main() -> None:
         st.markdown("编译器侧推理：查询 `models`，有则 `predict`，无则返回 None。")
         op_p = st.text_input("op_name", value="nn::conv2d_nchw_fp32", key="p_op")
         dev_p = st.text_input("device", value="NVIDIA_RTX_4090", key="p_dev")
-        params_infer = st.text_area(
+
+        with st.expander("params 模板（可选）", expanded=False):
+            tpls_i = list_param_templates(conn)
+            names_i = [t["name"] for t in tpls_i]
+            i1, i2, i3 = st.columns([2, 1, 1])
+            with i1:
+                pick_i = st.selectbox("选择模板", ["—"] + names_i, key="tpl_pick_infer")
+            with i2:
+                st.write("")
+                if st.button("加载到编辑区", key="btn_tpl_load_infer"):
+                    if pick_i != "—":
+                        t = get_param_template_by_name(conn, pick_i)
+                        if t:
+                            st.session_state.infer_params = json.dumps(
+                                t["params"], ensure_ascii=False, separators=(",", ":")
+                            )
+                            st.rerun()
+            with i3:
+                st.write("")
+            in1, in2 = st.columns([3, 1])
+            with in1:
+                st.text_input(
+                    "将当前 params 保存为模板",
+                    key="tpl_save_name_infer",
+                    placeholder="模板名称",
+                )
+            with in2:
+                st.write("")
+                st.write("")
+                if st.button("保存为模板", key="btn_tpl_save_infer"):
+                    try:
+                        p = json.loads(st.session_state.infer_params)
+                        if not isinstance(p, dict):
+                            raise ValueError("params 必须是 JSON 对象")
+                        nm = (st.session_state.get("tpl_save_name_infer") or "").strip()
+                        if not nm:
+                            raise ValueError("请填写模板名称")
+                        save_param_template(conn, nm, p)
+                        st.success(f"已保存模板「{nm}」")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+        st.text_area(
             "params (JSON)",
-            value='{"N": 1, "C": 64, "H": 32, "W": 32, "is_contiguous": true, "memory_stride": [64, 1]}',
             height=140,
-            key="p_params",
+            key="infer_params",
         )
         if st.button("预测"):
             try:
-                pdict = json.loads(params_infer)
+                pdict = json.loads(st.session_state.infer_params)
                 pred = predict_latency(conn, op_p, dev_p, pdict)
                 if pred is None:
                     st.info("无模型：返回 None（可回退到真实 Benchmark）。")
@@ -177,7 +286,7 @@ def main() -> None:
         if st.button("直接预测"):
             try:
                 order = json.loads(ord2)
-                pdict = json.loads(params_infer)
+                pdict = json.loads(st.session_state.infer_params)
                 if not isinstance(order, list):
                     raise ValueError("feature_order 无效")
                 val = predict_with_booster_json(pay2.strip(), order, pdict)

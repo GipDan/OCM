@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "ocm.sqlite3"
 
@@ -38,6 +38,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             model_payload TEXT NOT NULL,
             feature_order TEXT NOT NULL,
             PRIMARY KEY (op_name, device)
+        );
+
+        CREATE TABLE IF NOT EXISTS param_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            params TEXT NOT NULL
         );
         """
     )
@@ -120,6 +126,65 @@ def upsert_model(
         (op_name, device, model_payload, json.dumps(feature_order, ensure_ascii=False)),
     )
     conn.commit()
+
+
+def list_param_templates(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """All saved param templates: id, name, params (dict)."""
+    rows = conn.execute(
+        "SELECT id, name, params FROM param_templates ORDER BY name COLLATE NOCASE"
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "params": json.loads(r["params"]),
+            }
+        )
+    return out
+
+
+def get_param_template_by_name(
+    conn: sqlite3.Connection, name: str
+) -> dict[str, Any] | None:
+    r = conn.execute(
+        "SELECT id, name, params FROM param_templates WHERE name = ?",
+        (name,),
+    ).fetchone()
+    if r is None:
+        return None
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "params": json.loads(r["params"]),
+    }
+
+
+def save_param_template(
+    conn: sqlite3.Connection, name: str, params: dict[str, Any]
+) -> int:
+    """
+    Insert or replace template by name. Returns row id.
+    """
+    nm = name.strip()
+    payload = json.dumps(params, ensure_ascii=False, sort_keys=True)
+    conn.execute(
+        """
+        INSERT INTO param_templates (name, params) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET params = excluded.params
+        """,
+        (nm, payload),
+    )
+    conn.commit()
+    r = conn.execute("SELECT id FROM param_templates WHERE name = ?", (nm,)).fetchone()
+    return int(r["id"]) if r else 0
+
+
+def delete_param_template(conn: sqlite3.Connection, name: str) -> bool:
+    cur = conn.execute("DELETE FROM param_templates WHERE name = ?", (name,))
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def export_records_flat_csv_rows(
