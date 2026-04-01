@@ -42,11 +42,22 @@ def main() -> None:
         st.caption("零文件架构：模型以 JSON 文本存于 `models.model_payload`。")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["录入与自动训练", "手动训练", "导出 CSV", "模型干预", "推理试算"]
+        ["录入数据", "手动训练", "导出 CSV", "模型干预", "推理试算"]
     )
 
     with tab1:
-        st.markdown("录入 benchmark 样本；可选在样本数达到阈值后自动拟合 XGBoost。")
+        st.markdown("录入 benchmark 样本。请选择：**仅写入数据库**，或 **写入后自动训练**（同 `(op_name, device)` 下样本数 ≥ 2 时拟合 XGBoost）。")
+        mode = st.radio(
+            "录入模式",
+            (
+                "仅写入 records（不触发训练）",
+                "写入 records 后自动训练（样本数 ≥ 2 时拟合）",
+            ),
+            horizontal=True,
+            index=0,
+            help="仅写入适合先批量攒数据；自动训练会在每次提交后尝试用当前该算子+设备下的全部样本更新模型。",
+        )
+        auto_fit = mode.startswith("写入 records 后")
         c1, c2 = st.columns(2)
         with c1:
             op_name = st.text_input("op_name", value="nn::conv2d_nchw_fp32")
@@ -58,8 +69,7 @@ def main() -> None:
                 height=160,
             )
             latency = st.number_input("latency (ms)", min_value=0.0, value=1.452, format="%.6f")
-        auto_fit = st.checkbox("录入后自动训练（样本数 ≥ 2）", value=True)
-        if st.button("写入 records"):
+        if st.button("提交"):
             try:
                 params = json.loads(params_json)
                 if not isinstance(params, dict):

@@ -138,13 +138,16 @@ streamlit run app.py
 
 | 标签页 | 用途 |
 | :--- | :--- |
-| **录入与自动训练** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）；可勾选录入后自动训练（同 `(op_name, device)` 下样本数 ≥ 2 时拟合 XGBoost 并写入 `models`）。 |
+| **录入数据** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）。**录入模式**二选一：**仅写入 records**（不训练），或 **写入后自动训练**（同 `(op_name, device)` 下样本数 ≥ 2 时拟合 XGBoost 并写入 `models`）。 |
 | **手动训练** | 不新增记录，仅对已有样本组合触发训练。 |
 | **导出 CSV** | 将某一 `(op_name, device)` 的 `records` 展平为 CSV，便于离线清洗与调参。 |
 | **模型干预** | 粘贴离线得到的 `model_payload`（`booster.save_raw('json')` 的文本）与 **`feature_order`**（JSON 字符串数组），覆盖数据库中的模型。 |
 | **推理试算** | 用数据库中的模型预测耗时；也可不经过数据库，手动粘贴 `model_payload` 与 `feature_order` 做试算。 |
 
 ### 3. Python API 调用示例
+
+- **仅录入**：直接调用 `insert_record(...)`，或 `add_record_maybe_autofit(..., auto_fit=False)`（默认即为不训练）。
+- **录入并自动训练**：`add_record_maybe_autofit(..., auto_fit=True)`，或在多条 `insert_record` 之后调用 `fit_and_store_model(...)`。
 
 在**项目根目录**下将当前目录加入 `PYTHONPATH`，或使用 `pip install -e .`（若已配置可编辑安装）后导入 `ocm`：
 

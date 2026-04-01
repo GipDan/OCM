@@ -15,11 +15,12 @@ def add_record_maybe_autofit(
     device: str,
     params: dict[str, Any],
     latency: float,
-    auto_fit: bool = True,
+    auto_fit: bool = False,
     min_samples: int = MIN_SAMPLES_DEFAULT,
 ) -> tuple[int, tuple[bool, str] | None]:
     """
-    Insert one benchmark row. If auto_fit and enough samples exist, refit model.
+    Insert one benchmark row. If auto_fit is True, refit model when enough samples exist.
+    Default is only insert (no training); pass auto_fit=True for record-then-train.
     Returns (record_id, fit_result_or_none).
     """
     rid = insert_record(conn, op_name, device, params, latency)
