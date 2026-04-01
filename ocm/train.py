@@ -28,12 +28,19 @@ def fit_and_store_model(
     min_samples: int = MIN_SAMPLES_DEFAULT,
     xgb_params: dict[str, Any] | None = None,
     merge_derived: bool = True,
+    feature_order_key: str | None = None,
+    *,
+    unlabeled_only: bool = False,
 ) -> tuple[bool, str]:
     """
-    Load all records for (op_name, device), fit XGBRegressor if len >= min_samples.
-    Returns (success, message).
+    Load records for (op_name, device).
+    - unlabeled_only=True: only rows with NULL feature_order_key.
+    - elif feature_order_key is set: only matching key.
+    - else: all rows for that op+device.
     """
-    recs = fetch_records(conn, op_name, device)
+    recs = fetch_records(
+        conn, op_name, device, feature_order_key, unlabeled_only=unlabeled_only
+    )
     if len(recs) < min_samples:
         return False, f"需要至少 {min_samples} 条样本，当前 {len(recs)} 条。"
 
@@ -66,11 +73,13 @@ def fit_and_store_model(
 
     booster = reg.get_booster()
     raw = booster.save_raw("json")
-    # save_raw 可能返回 bytes / bytearray / memoryview；str(raw) 会变成非法的 "bytearray(...)" 文本
     if isinstance(raw, str):
         payload = raw
     else:
         payload = bytes(raw).decode("utf-8")
 
-    upsert_model(conn, op_name, device, payload, feature_order)
-    return True, f"已训练并保存模型，样本数 {len(recs)}，特征数 {len(feature_order)}。"
+    fk = upsert_model(conn, op_name, device, payload, feature_order)
+    return True, (
+        f"已训练并保存模型：样本 {len(recs)}，特征 {len(feature_order)}，"
+        f"feature_order_key={fk}"
+    )

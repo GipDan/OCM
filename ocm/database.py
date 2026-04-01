@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from ocm.keys import make_feature_order_key
+
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "ocm.sqlite3"
 
 
@@ -16,6 +18,49 @@ def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Upgrade old DBs: records.feature_order_key; models PK includes feature_order_key."""
+    rec_cols = {r[1] for r in conn.execute("PRAGMA table_info(records)").fetchall()}
+    if rec_cols and "feature_order_key" not in rec_cols:
+        conn.execute("ALTER TABLE records ADD COLUMN feature_order_key TEXT")
+        conn.commit()
+
+    m_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='models'"
+    ).fetchone()
+    if not m_exists:
+        return
+    m_cols = {r[1] for r in conn.execute("PRAGMA table_info(models)").fetchall()}
+    if "feature_order_key" in m_cols:
+        return
+
+    conn.execute("ALTER TABLE models RENAME TO models_legacy")
+    conn.execute(
+        """
+        CREATE TABLE models (
+            op_name TEXT NOT NULL,
+            device TEXT NOT NULL,
+            feature_order_key TEXT NOT NULL,
+            model_payload TEXT NOT NULL,
+            feature_order TEXT NOT NULL,
+            PRIMARY KEY (op_name, device, feature_order_key)
+        )
+        """
+    )
+    for r in conn.execute("SELECT * FROM models_legacy").fetchall():
+        fo = json.loads(r["feature_order"])
+        fk = make_feature_order_key(fo)
+        conn.execute(
+            """
+            INSERT INTO models (op_name, device, feature_order_key, model_payload, feature_order)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (r["op_name"], r["device"], fk, r["model_payload"], r["feature_order"]),
+        )
+    conn.execute("DROP TABLE models_legacy")
+    conn.commit()
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -28,16 +73,18 @@ def init_db(conn: sqlite3.Connection) -> None:
             op_name TEXT NOT NULL,
             device TEXT NOT NULL,
             params TEXT NOT NULL,
-            latency REAL NOT NULL
+            latency REAL NOT NULL,
+            feature_order_key TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_records_op_device ON records (op_name, device);
 
         CREATE TABLE IF NOT EXISTS models (
             op_name TEXT NOT NULL,
             device TEXT NOT NULL,
+            feature_order_key TEXT NOT NULL,
             model_payload TEXT NOT NULL,
             feature_order TEXT NOT NULL,
-            PRIMARY KEY (op_name, device)
+            PRIMARY KEY (op_name, device, feature_order_key)
         );
 
         CREATE TABLE IF NOT EXISTS param_templates (
@@ -48,6 +95,12 @@ def init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.commit()
+    _migrate_schema(conn)
+    # 必须在迁移后为旧库补上 feature_order_key 列，再建索引，否则 legacy records 表无此列会报错
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_records_fok ON records (op_name, device, feature_order_key)"
+    )
+    conn.commit()
 
 
 def insert_record(
@@ -56,20 +109,67 @@ def insert_record(
     device: str,
     params: dict[str, Any],
     latency: float,
+    feature_order_key: str | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO records (op_name, device, params, latency) VALUES (?, ?, ?, ?)",
-        (op_name, device, json.dumps(params, ensure_ascii=False, sort_keys=True), float(latency)),
+        """
+        INSERT INTO records (op_name, device, params, latency, feature_order_key)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            op_name,
+            device,
+            json.dumps(params, ensure_ascii=False, sort_keys=True),
+            float(latency),
+            feature_order_key,
+        ),
     )
     conn.commit()
     return int(cur.lastrowid)
 
 
-def fetch_records(conn: sqlite3.Connection, op_name: str, device: str) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT id, op_name, device, params, latency FROM records WHERE op_name = ? AND device = ? ORDER BY id",
-        (op_name, device),
-    ).fetchall()
+def fetch_records(
+    conn: sqlite3.Connection,
+    op_name: str,
+    device: str,
+    feature_order_key: str | None = None,
+    *,
+    unlabeled_only: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    Rows for (op_name, device).
+    - feature_order_key None and unlabeled_only False: all rows.
+    - unlabeled_only True: only rows where feature_order_key IS NULL.
+    - feature_order_key set: only rows with that exact key.
+    """
+    if unlabeled_only:
+        rows = conn.execute(
+            """
+            SELECT id, op_name, device, params, latency, feature_order_key
+            FROM records
+            WHERE op_name = ? AND device = ? AND feature_order_key IS NULL
+            ORDER BY id
+            """,
+            (op_name, device),
+        ).fetchall()
+    elif feature_order_key is None:
+        rows = conn.execute(
+            """
+            SELECT id, op_name, device, params, latency, feature_order_key
+            FROM records WHERE op_name = ? AND device = ? ORDER BY id
+            """,
+            (op_name, device),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, op_name, device, params, latency, feature_order_key
+            FROM records
+            WHERE op_name = ? AND device = ? AND feature_order_key = ?
+            ORDER BY id
+            """,
+            (op_name, device, feature_order_key),
+        ).fetchall()
     out: list[dict[str, Any]] = []
     for r in rows:
         out.append(
@@ -79,6 +179,7 @@ def fetch_records(conn: sqlite3.Connection, op_name: str, device: str) -> list[d
                 "device": r["device"],
                 "params": json.loads(r["params"]),
                 "latency": r["latency"],
+                "feature_order_key": r["feature_order_key"],
             }
         )
     return out
@@ -91,18 +192,89 @@ def list_op_device_pairs(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(str(r[0]), str(r[1])) for r in cur.fetchall()]
 
 
-def get_model_row(
+def list_record_export_keys(
     conn: sqlite3.Connection, op_name: str, device: str
-) -> dict[str, Any] | None:
-    r = conn.execute(
-        "SELECT op_name, device, model_payload, feature_order FROM models WHERE op_name = ? AND device = ?",
+) -> list[str | None]:
+    """
+    Distinct feature_order_key values for export UI. None represents 未标注 (NULL in DB).
+    """
+    rows = conn.execute(
+        """
+        SELECT DISTINCT feature_order_key FROM records
+        WHERE op_name = ? AND device = ?
+        ORDER BY feature_order_key IS NULL DESC, feature_order_key
+        """,
         (op_name, device),
-    ).fetchone()
-    if r is None:
+    ).fetchall()
+    keys: list[str | None] = []
+    for (k,) in rows:
+        keys.append(k)
+    return keys
+
+
+def list_models_for_op_device(
+    conn: sqlite3.Connection, op_name: str, device: str
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT op_name, device, feature_order_key, model_payload, feature_order
+        FROM models WHERE op_name = ? AND device = ?
+        ORDER BY feature_order_key
+        """,
+        (op_name, device),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "op_name": r["op_name"],
+                "device": r["device"],
+                "feature_order_key": r["feature_order_key"],
+                "model_payload": r["model_payload"],
+                "feature_order": json.loads(r["feature_order"]),
+            }
+        )
+    return out
+
+
+def get_model_row(
+    conn: sqlite3.Connection,
+    op_name: str,
+    device: str,
+    feature_order_key: str | None = None,
+) -> dict[str, Any] | None:
+    """
+    One model row. If feature_order_key is None and exactly one model exists for
+    (op_name, device), return it; if zero or multiple, return None.
+    """
+    if feature_order_key is not None:
+        r = conn.execute(
+            """
+            SELECT op_name, device, feature_order_key, model_payload, feature_order
+            FROM models WHERE op_name = ? AND device = ? AND feature_order_key = ?
+            """,
+            (op_name, device, feature_order_key),
+        ).fetchone()
+        if r is None:
+            return None
+        return {
+            "op_name": r["op_name"],
+            "device": r["device"],
+            "feature_order_key": r["feature_order_key"],
+            "model_payload": r["model_payload"],
+            "feature_order": json.loads(r["feature_order"]),
+        }
+    rows = conn.execute(
+        "SELECT op_name, device, feature_order_key, model_payload, feature_order FROM models WHERE op_name = ? AND device = ?",
+        (op_name, device),
+    ).fetchall()
+    if len(rows) != 1:
         return None
+    r = rows[0]
     return {
         "op_name": r["op_name"],
         "device": r["device"],
+        "feature_order_key": r["feature_order_key"],
         "model_payload": r["model_payload"],
         "feature_order": json.loads(r["feature_order"]),
     }
@@ -114,18 +286,26 @@ def upsert_model(
     device: str,
     model_payload: str,
     feature_order: list[str],
-) -> None:
+) -> str:
+    fk = make_feature_order_key(feature_order)
     conn.execute(
         """
-        INSERT INTO models (op_name, device, model_payload, feature_order)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(op_name, device) DO UPDATE SET
+        INSERT INTO models (op_name, device, feature_order_key, model_payload, feature_order)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(op_name, device, feature_order_key) DO UPDATE SET
             model_payload = excluded.model_payload,
             feature_order = excluded.feature_order
         """,
-        (op_name, device, model_payload, json.dumps(feature_order, ensure_ascii=False)),
+        (
+            op_name,
+            device,
+            fk,
+            model_payload,
+            json.dumps(feature_order, ensure_ascii=False),
+        ),
     )
     conn.commit()
+    return fk
 
 
 def list_param_templates(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -188,26 +368,49 @@ def delete_param_template(conn: sqlite3.Connection, name: str) -> bool:
 
 
 def export_records_flat_csv_rows(
-    conn: sqlite3.Connection, op_name: str, device: str
+    conn: sqlite3.Connection,
+    op_name: str,
+    device: str,
+    feature_order_key: str | None = None,
+    *,
+    unlabeled_only: bool = False,
 ) -> tuple[list[str], list[list[Any]]]:
-    """Return header + rows for CSV export (flattened params + latency)."""
+    """Return header + rows for CSV export (flattened params + latency + meta columns)."""
     from ocm.features import flatten_params_for_export
 
-    recs = fetch_records(conn, op_name, device)
+    recs = fetch_records(
+        conn, op_name, device, feature_order_key, unlabeled_only=unlabeled_only
+    )
     if not recs:
         return [], []
-    rows_out: list[list[Any]] = []
-    all_keys: set[str] = set()
     flattened: list[dict[str, Any]] = []
+    all_keys: set[str] = set()
     for rec in recs:
         flat = flatten_params_for_export(rec["params"])
+        flat["record_id"] = rec["id"]
+        flat["feature_order_key"] = rec["feature_order_key"] or ""
         flat["latency"] = rec["latency"]
         flattened.append(flat)
         all_keys.update(flat.keys())
-    header = sorted(all_keys)
-    if "latency" in header:
-        header.remove("latency")
-    header.append("latency")
+    param_keys = sorted(
+        k for k in all_keys if k not in ("record_id", "feature_order_key", "latency")
+    )
+    header = ["record_id", "feature_order_key"] + param_keys + ["latency"]
+    rows_out: list[list[Any]] = []
     for flat in flattened:
         rows_out.append([flat.get(k, "") for k in header])
     return header, rows_out
+
+
+def export_filename_suffix(op_name: str, device: str, segment: str) -> str:
+    """
+    Build a short filename segment. segment is one of:
+    'all', 'unlabeled', or the literal feature_order_key string (hashed for length).
+    """
+    safe_op = op_name.replace("::", "_")
+    if segment == "all":
+        return f"{safe_op}_{device}_all"
+    if segment == "unlabeled":
+        return f"{safe_op}_{device}_unlabeled"
+    h = hash(segment) & 0xFFFFFFFF
+    return f"{safe_op}_{device}_fok_{h:08x}"

@@ -18,12 +18,13 @@ def predict_latency(
     device: str,
     params: dict[str, Any],
     merge_derived: bool = True,
+    feature_order_key: str | None = None,
 ) -> float | None:
     """
     Return predicted latency (ms) or None if no model exists.
-    Uses the same optional derived features as training when merge_derived=True.
+    If feature_order_key is None and multiple models exist for (op_name, device), returns None.
     """
-    row = get_model_row(conn, op_name, device)
+    row = get_model_row(conn, op_name, device, feature_order_key)
     if row is None:
         return None
 

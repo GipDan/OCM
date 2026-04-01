@@ -20,11 +20,14 @@ if str(ROOT) not in sys.path:
 from ocm.database import (  # noqa: E402
     DEFAULT_DB_PATH,
     delete_param_template,
+    export_filename_suffix,
     export_records_flat_csv_rows,
     get_connection,
     get_param_template_by_name,
     init_db,
+    list_models_for_op_device,
     list_op_device_pairs,
+    list_record_export_keys,
     list_param_templates,
     save_param_template,
     upsert_model,
@@ -129,6 +132,12 @@ def main() -> None:
         with c1:
             op_name = st.text_input("op_name", value="nn::conv2d_nchw_fp32")
             device = st.text_input("device", value="NVIDIA_RTX_4090")
+            rec_fok = st.text_input(
+                "feature_order_key（可选）",
+                value="",
+                key="rec_fok",
+                help="同一算子、设备下区分不同特征模式/样本批次；与导出、训练筛选、模型主键一致。留空表示未标注。",
+            )
         with c2:
             st.text_area(
                 "params (JSON)",
@@ -141,8 +150,15 @@ def main() -> None:
                 params = json.loads(st.session_state.record_params)
                 if not isinstance(params, dict):
                     raise ValueError("params 必须是 JSON 对象")
+                fok = rec_fok.strip() or None
                 rid, fit_res = add_record_maybe_autofit(
-                    conn, op_name, device, params, latency, auto_fit=auto_fit
+                    conn,
+                    op_name,
+                    device,
+                    params,
+                    latency,
+                    auto_fit=auto_fit,
+                    feature_order_key=fok,
                 )
                 st.success(f"已写入记录 id={rid}")
                 if fit_res is not None:
@@ -155,7 +171,9 @@ def main() -> None:
                 st.error(str(e))
 
     with tab2:
-        st.markdown("针对已有样本手动触发训练（不新增记录）。")
+        st.markdown(
+            "针对已有样本手动触发训练（不新增记录）。可选用 **feature_order_key** 只使用带该标签的样本；留空则使用该算子+设备下全部样本。"
+        )
         pairs = list_op_device_pairs(conn)
         if not pairs:
             st.warning("暂无 records，请先在「录入」页添加数据。")
@@ -165,15 +183,42 @@ def main() -> None:
             op_sel, dev_sel = pairs[idx]
             st.text(f"op_name: {op_sel}")
             st.text(f"device: {dev_sel}")
+            ek = list_record_export_keys(conn, op_sel, dev_sel)
+            opts = [("（不筛选，使用全部样本）", "all")]
+            if None in ek:
+                opts.append(("仅未标注 (feature_order_key 为空)", "null"))
+            for k in ek:
+                if k is not None:
+                    short = k if len(k) <= 72 else k[:69] + "..."
+                    opts.append((short, k))
+            lab_list = [o[0] for o in opts]
+            sel_i = st.selectbox("训练样本范围", range(len(lab_list)), format_func=lambda i: lab_list[i])
+            train_fok: str | None
+            mode = opts[sel_i][1]
+            if mode == "all":
+                train_fok = None
+            elif mode == "null":
+                train_fok = "__UNLABELED__"
+            else:
+                train_fok = mode
             if st.button("执行训练"):
-                ok, msg = fit_and_store_model(conn, op_sel, dev_sel)
+                if train_fok == "__UNLABELED__":
+                    ok, msg = fit_and_store_model(
+                        conn, op_sel, dev_sel, unlabeled_only=True
+                    )
+                else:
+                    ok, msg = fit_and_store_model(
+                        conn, op_sel, dev_sel, feature_order_key=train_fok
+                    )
                 if ok:
                     st.success(msg)
                 else:
                     st.warning(msg)
 
     with tab3:
-        st.markdown("将某一算子在设备上的全部记录导出为展平 CSV。")
+        st.markdown(
+            "按 **算子 + 设备 + feature_order_key** 维度导出展平 CSV（含 `record_id`、`feature_order_key` 列）。"
+        )
         pairs = list_op_device_pairs(conn)
         if not pairs:
             st.warning("暂无数据可导出。")
@@ -181,7 +226,42 @@ def main() -> None:
             labels = [f"{a} @ {b}" for a, b in pairs]
             idx = st.selectbox("导出对象", range(len(labels)), format_func=lambda i: labels[i], key="ex")
             op_sel, dev_sel = pairs[idx]
-            header, rows = export_records_flat_csv_rows(conn, op_sel, dev_sel)
+            ek = list_record_export_keys(conn, op_sel, dev_sel)
+            ex_opts: list[tuple[str, str, str | None, bool]] = []
+            ex_opts.append(("全部记录（不按 key 筛选）", "all", None, False))
+            if None in ek:
+                ex_opts.append(("仅未标注 (feature_order_key 为空)", "null", None, True))
+            for k in ek:
+                if k is not None:
+                    ex_opts.append(
+                        (
+                            k if len(k) <= 96 else k[:93] + "...",
+                            "key",
+                            k,
+                            False,
+                        )
+                    )
+            ex_labels = [o[0] for o in ex_opts]
+            ex_i = st.selectbox(
+                "feature_order_key 范围",
+                range(len(ex_labels)),
+                format_func=lambda i: ex_labels[i],
+                key="ex_fok",
+            )
+            mode = ex_opts[ex_i][1]
+            if mode == "all":
+                header, rows = export_records_flat_csv_rows(conn, op_sel, dev_sel)
+                fname = f"ocm_{export_filename_suffix(op_sel, dev_sel, 'all')}.csv"
+            elif mode == "null":
+                header, rows = export_records_flat_csv_rows(
+                    conn, op_sel, dev_sel, unlabeled_only=True
+                )
+                fname = f"ocm_{export_filename_suffix(op_sel, dev_sel, 'unlabeled')}.csv"
+            else:
+                k = ex_opts[ex_i][2]
+                assert k is not None
+                header, rows = export_records_flat_csv_rows(conn, op_sel, dev_sel, k)
+                fname = f"ocm_{export_filename_suffix(op_sel, dev_sel, k)}.csv"
             if header:
                 df = pd.DataFrame(rows, columns=header)
                 csv_buf = io.StringIO()
@@ -189,8 +269,9 @@ def main() -> None:
                 st.download_button(
                     "下载 CSV",
                     data=csv_buf.getvalue().encode("utf-8"),
-                    file_name=f"ocm_{op_sel.replace('::', '_')}_{dev_sel}.csv",
+                    file_name=fname,
                     mime="text/csv",
+                    key="dl_csv",
                 )
                 st.dataframe(df, use_container_width=True)
 
@@ -211,8 +292,8 @@ def main() -> None:
                 order = json.loads(feat_order)
                 if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
                     raise ValueError("feature_order 必须是非空字符串数组")
-                upsert_model(conn, op_m, dev_m, payload.strip(), order)
-                st.success("已更新模型与特征顺序。")
+                fk = upsert_model(conn, op_m, dev_m, payload.strip(), order)
+                st.success(f"已更新模型。主键 feature_order_key=`{fk}`")
             except Exception as e:
                 st.error(str(e))
 
@@ -268,10 +349,24 @@ def main() -> None:
             height=140,
             key="infer_params",
         )
+        mods = list_models_for_op_device(conn, op_p, dev_p)
+        pred_fok: str | None = None
+        if len(mods) > 1:
+            pred_fok = st.selectbox(
+                "模型变体 (feature_order_key)",
+                [m["feature_order_key"] for m in mods],
+                key="infer_model_variant",
+            )
         if st.button("预测"):
             try:
                 pdict = json.loads(st.session_state.infer_params)
-                pred = predict_latency(conn, op_p, dev_p, pdict)
+                pred = predict_latency(
+                    conn,
+                    op_p,
+                    dev_p,
+                    pdict,
+                    feature_order_key=pred_fok,
+                )
                 if pred is None:
                     st.info("无模型：返回 None（可回退到真实 Benchmark）。")
                 else:

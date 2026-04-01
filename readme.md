@@ -34,15 +34,17 @@
 | `device` | TEXT | 目标硬件标识 | `"NVIDIA_RTX_4090"` |
 | `params` | TEXT (JSON) | **算法参数与内存状态的完整集合** | `{"N":1, "C":64, "is_contiguous":true, "memory_stride":[64,1]}` |
 | `latency` | REAL | 实际执行的计算用时（目标预测值 $Y$） | `1.452` (ms) |
+| `feature_order_key` | TEXT | 可选。用户自定义的**样本批次/特征模式标签**，与训练筛选、导出、`models` 主键一致；`NULL` 表示未标注。 |
 
 ### 2. 模型载体表 (`models`)
-用于存储针对特定设备上特定算子训练出的 XGBoost 模型。
+同一 `(op_name, device)` 下可并存**多个**模型，由 **`feature_order_key`** 区分（与训练得到的特征列序列一一对应；由 `feature_order` 列表经 `make_feature_order_key` 得到稳定字符串）。
 
 | 字段名 | 数据类型 | 描述说明 |
 | :--- | :--- | :--- |
 | `op_name` | TEXT | 算子标准名称 (Primary Key Part 1) |
 | `device` | TEXT | 目标硬件标识 (Primary Key Part 2) |
-| `model_payload` | TEXT (JSON) | **XGBoost 森林结构的完整 JSON 序列化字符串**。系统不保存任何物理模型文件，推理时直接读取此字符串并反序列化到内存。 |
+| `feature_order_key` | TEXT | 特征列顺序的规范串 (PK Part 3)，同序同键。 |
+| `model_payload` | TEXT (JSON) | **XGBoost 森林结构的完整 JSON 序列化字符串**。 |
 | `feature_order` | TEXT (JSON) | 训练时特征列名顺序，推理时与 `params` 对齐。 |
 
 ### 3. 参数模板表 (`param_templates`)
@@ -142,17 +144,18 @@ streamlit run app.py
 
 | 标签页 | 用途 |
 | :--- | :--- |
-| **录入数据** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）。**录入模式**二选一：**仅写入 records**（不训练），或 **写入后自动训练**（同 `(op_name, device)` 下样本数 ≥ 2 时拟合 XGBoost 并写入 `models`）。可在展开区 **选择模板加载到编辑区**，或将当前 JSON **命名保存为模板**，或删除已有模板。 |
-| **手动训练** | 不新增记录，仅对已有样本组合触发训练。 |
-| **导出 CSV** | 将某一 `(op_name, device)` 的 `records` 展平为 CSV，便于离线清洗与调参。 |
+| **录入数据** | 填写 `op_name`、`device`、可选 **`feature_order_key`**（区分样本批次/特征模式）、`params`（JSON）与 `latency`（ms）。录入模式二选一：仅写入，或写入后按**同一 key** 筛选样本自动训练。 |
+| **手动训练** | 选择 `(op_name, device)` 与**训练样本范围**：全部、仅未标注（`feature_order_key` 为空），或某一 key。 |
+| **导出 CSV** | 选择 `(op_name, device)` 与 **feature_order_key 范围**（全部 / 仅未标注 / 某一 key）。CSV 含 `record_id`、`feature_order_key` 与展平后的参数列。 |
 | **模型干预** | 粘贴离线得到的 `model_payload`（`booster.save_raw('json')` 的文本）与 **`feature_order`**（JSON 字符串数组），覆盖数据库中的模型。 |
-| **推理试算** | 用数据库中的模型预测耗时；也可不经过数据库，手动粘贴 `model_payload` 与 `feature_order` 做试算。支持与本表相同的 **params 模板**加载与保存。 |
+| **推理试算** | 若同一 `(op_name, device)` 存在多个模型，需选择 **feature_order_key** 变体；仅一个模型时可自动选用。支持 params 模板加载与保存。 |
 
 ### 3. Python API 调用示例
 
 - **仅录入**：直接调用 `insert_record(...)`，或 `add_record_maybe_autofit(..., auto_fit=False)`（默认即为不训练）。
 - **录入并自动训练**：`add_record_maybe_autofit(..., auto_fit=True)`，或在多条 `insert_record` 之后调用 `fit_and_store_model(...)`。
 - **params 模板**：`list_param_templates`、`get_param_template_by_name`、`save_param_template`、`delete_param_template`（名称唯一，同名保存则覆盖 `params`）。
+- **多模型 / 特征模式**：`insert_record(..., feature_order_key=...)`；`fit_and_store_model(..., feature_order_key=...)` 或 `unlabeled_only=True`；`predict_latency(..., feature_order_key=...)`；`list_models_for_op_device`、`get_model_row`、`make_feature_order_key`。
 
 在**项目根目录**下将当前目录加入 `PYTHONPATH`，或使用 `pip install -e .`（若已配置可编辑安装）后导入 `ocm`：
 
@@ -179,7 +182,7 @@ conn.close()
 "
 ```
 
-推理时若 **`models` 中无对应 `(op_name, device)`**，`predict_latency` 返回 `None`，编译器侧可回退到真实 Benchmark。
+推理时若 **`models` 中无对应模型**（含多模型时未指定 `feature_order_key` 且无法唯一确定），`predict_latency` 返回 `None`，编译器侧可回退到真实 Benchmark。
 
 ### 4. 测试目录说明
 

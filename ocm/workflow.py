@@ -17,14 +17,17 @@ def add_record_maybe_autofit(
     latency: float,
     auto_fit: bool = False,
     min_samples: int = MIN_SAMPLES_DEFAULT,
+    feature_order_key: str | None = None,
 ) -> tuple[int, tuple[bool, str] | None]:
     """
     Insert one benchmark row. If auto_fit is True, refit model when enough samples exist.
-    Default is only insert (no training); pass auto_fit=True for record-then-train.
+    Training uses the same feature_order_key filter as the inserted row when that key is set.
     Returns (record_id, fit_result_or_none).
     """
-    rid = insert_record(conn, op_name, device, params, latency)
+    rid = insert_record(conn, op_name, device, params, latency, feature_order_key=feature_order_key)
     if not auto_fit:
         return rid, None
-    ok, msg = fit_and_store_model(conn, op_name, device, min_samples=min_samples)
+    ok, msg = fit_and_store_model(
+        conn, op_name, device, min_samples=min_samples, feature_order_key=feature_order_key
+    )
     return rid, (ok, msg)
