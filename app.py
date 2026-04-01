@@ -25,7 +25,6 @@ from ocm.database import (  # noqa: E402
     export_records_flat_csv_rows,
     get_connection,
     get_param_template_by_name,
-    get_record_by_id,
     init_db,
     list_models_for_op_device,
     list_op_device_pairs,
@@ -441,142 +440,98 @@ def main() -> None:
         fdev = mgmt_dev.strip() or None
         recs = list_records(conn, op_name=fop, device=fdev, limit=int(mgmt_limit))
 
-        st.subheader("预览")
+        st.subheader("预览与编辑")
         if not recs:
             st.info("无匹配记录。")
         else:
-            preview_rows = []
+            edit_rows: list[dict[str, object]] = []
             for r in recs:
-                pj = json.dumps(r["params"], ensure_ascii=False, separators=(",", ":"))
-                if len(pj) > 200:
-                    pj = pj[:197] + "..."
-                preview_rows.append(
+                edit_rows.append(
                     {
-                        "id": r["id"],
-                        "op_name": r["op_name"],
-                        "device": r["device"],
-                        "latency": r["latency"],
-                        "feature_order_key": (r["feature_order_key"] or "")[:100],
-                        "params_preview": pj,
+                        "id": int(r["id"]),
+                        "op_name": str(r["op_name"]),
+                        "device": str(r["device"]),
+                        "latency": float(r["latency"]),
+                        "feature_order_key": r["feature_order_key"] or "",
+                        "params": json.dumps(
+                            r["params"], ensure_ascii=False, separators=(",", ":")
+                        ),
+                        "set_null_key": False,
+                        "delete": False,
                     }
                 )
-            st.dataframe(
-                pd.DataFrame(preview_rows),
+            edit_df = pd.DataFrame(edit_rows)
+            edited = st.data_editor(
+                edit_df,
                 use_container_width=True,
-                height=min(420, 80 + len(recs) * 35),
+                hide_index=True,
+                num_rows="fixed",
+                column_config={
+                    "id": st.column_config.NumberColumn("id", disabled=True),
+                    "op_name": st.column_config.TextColumn("op_name"),
+                    "device": st.column_config.TextColumn("device"),
+                    "latency": st.column_config.NumberColumn("latency (ms)", format="%.6f"),
+                    "feature_order_key": st.column_config.TextColumn("feature_order_key"),
+                    "params": st.column_config.TextColumn("params (JSON)"),
+                    "set_null_key": st.column_config.CheckboxColumn("置空key"),
+                    "delete": st.column_config.CheckboxColumn("删除此行"),
+                },
+                key="mgmt_editor",
+                height=min(560, 120 + len(edit_rows) * 35),
             )
 
-        st.subheader("修改")
-        id_list = [r["id"] for r in recs] if recs else []
-        direct_id = st.number_input("或输入记录 id 直接加载", min_value=0, value=0, step=1, key="mgmt_direct_id")
-        load_id = int(direct_id) if direct_id > 0 else None
-        sel_edit = st.selectbox(
-            "选择要编辑的记录",
-            ["—"] + [str(i) for i in id_list],
-            key="mgmt_edit_pick",
-        )
-        edit_row = None
-        if load_id:
-            edit_row = get_record_by_id(conn, load_id)
-            if edit_row is None:
-                st.warning(f"id={load_id} 不存在。")
-        elif sel_edit != "—":
-            edit_row = get_record_by_id(conn, int(sel_edit))
-
-        if edit_row:
-            e1, e2 = st.columns(2)
-            with e1:
-                e_op = st.text_input("op_name", value=edit_row["op_name"], key="mgmt_e_op")
-                e_dev = st.text_input("device", value=edit_row["device"], key="mgmt_e_dev")
-            with e2:
-                e_lat = st.number_input(
-                    "latency (ms)",
-                    value=float(edit_row["latency"]),
-                    format="%.6f",
-                    key="mgmt_e_lat",
-                )
-            e_params = st.text_area(
-                "params (JSON)",
-                value=json.dumps(
-                    edit_row["params"], ensure_ascii=False, separators=(",", ":")
-                ),
-                height=160,
-                key="mgmt_e_params",
-            )
-            e_auto = st.checkbox("保存时按 params 自动计算 feature_order_key", value=True, key="mgmt_e_auto")
-            e_manual_fok = st.text_input(
-                "手动指定 feature_order_key（非空则优先于自动）",
-                value=edit_row["feature_order_key"] or "",
-                key="mgmt_e_mfok",
-            )
-            e_null = st.checkbox("设为未标注（NULL，忽略自动与手动）", value=False, key="mgmt_e_null")
-            if st.button("保存修改", key="mgmt_save"):
+            if st.button("应用表格修改", key="mgmt_apply", type="primary"):
+                updated_cnt = 0
+                deleted_cnt = 0
                 try:
-                    pdict = json.loads(e_params)
-                    if not isinstance(pdict, dict):
-                        raise ValueError("params 须为 JSON 对象")
-                    rid = int(edit_row["id"])
-                    if e_null:
-                        update_record(
-                            conn,
-                            rid,
-                            e_op,
-                            e_dev,
-                            pdict,
-                            e_lat,
-                            feature_order_key=None,
-                            auto_key_from_params=False,
-                        )
-                        st.success(f"已更新 id={rid}，feature_order_key=NULL")
-                    elif (e_manual_fok or "").strip():
-                        update_record(
-                            conn,
-                            rid,
-                            e_op,
-                            e_dev,
-                            pdict,
-                            e_lat,
-                            feature_order_key=(e_manual_fok or "").strip(),
-                            auto_key_from_params=False,
-                        )
-                        st.success(f"已更新 id={rid}")
-                    else:
-                        fk = update_record(
-                            conn,
-                            rid,
-                            e_op,
-                            e_dev,
-                            pdict,
-                            e_lat,
-                            auto_key_from_params=e_auto,
-                        )
-                        st.success(f"已更新 id={rid}，feature_order_key=`{fk}`")
+                    for row in edited.to_dict(orient="records"):
+                        rid = int(row["id"])
+                        if bool(row.get("delete", False)):
+                            if delete_record(conn, rid):
+                                deleted_cnt += 1
+                            continue
+                        params_obj = json.loads(str(row["params"]))
+                        if not isinstance(params_obj, dict):
+                            raise ValueError(f"id={rid}: params 必须是 JSON 对象")
+                        if bool(row.get("set_null_key", False)):
+                            update_record(
+                                conn,
+                                rid,
+                                str(row["op_name"]),
+                                str(row["device"]),
+                                params_obj,
+                                float(row["latency"]),
+                                feature_order_key=None,
+                                auto_key_from_params=False,
+                            )
+                        else:
+                            manual_fk = str(row.get("feature_order_key", "")).strip()
+                            if manual_fk:
+                                update_record(
+                                    conn,
+                                    rid,
+                                    str(row["op_name"]),
+                                    str(row["device"]),
+                                    params_obj,
+                                    float(row["latency"]),
+                                    feature_order_key=manual_fk,
+                                    auto_key_from_params=False,
+                                )
+                            else:
+                                update_record(
+                                    conn,
+                                    rid,
+                                    str(row["op_name"]),
+                                    str(row["device"]),
+                                    params_obj,
+                                    float(row["latency"]),
+                                    auto_key_from_params=True,
+                                )
+                        updated_cnt += 1
+                    st.success(f"完成：更新 {updated_cnt} 条，删除 {deleted_cnt} 条")
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
-
-        st.subheader("删除")
-        del_direct = st.number_input(
-            "或输入要删除的记录 id（与下拉里二选一）", min_value=0, value=0, step=1, key="mgmt_del_direct"
-        )
-        sel_del = st.selectbox(
-            "选择要删除的记录",
-            ["—"] + [str(i) for i in id_list],
-            key="mgmt_del_pick",
-        )
-        del_confirm = st.checkbox("确认删除（不可恢复）", key="mgmt_del_conf")
-        if st.button("删除所选记录", type="primary", key="mgmt_del_btn"):
-            if not del_confirm:
-                st.warning("请勾选确认删除。")
-            else:
-                did = int(del_direct) if del_direct > 0 else (int(sel_del) if sel_del != "—" else 0)
-                if did <= 0:
-                    st.warning("请选择一条记录或输入有效 id。")
-                elif delete_record(conn, did):
-                    st.success(f"已删除 id={did}")
-                    st.rerun()
-                else:
-                    st.error("删除失败（记录可能已不存在）。")
 
     conn.close()
 
