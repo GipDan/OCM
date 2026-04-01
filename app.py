@@ -132,11 +132,9 @@ def main() -> None:
         with c1:
             op_name = st.text_input("op_name", value="nn::conv2d_nchw_fp32")
             device = st.text_input("device", value="NVIDIA_RTX_4090")
-            rec_fok = st.text_input(
-                "feature_order_key（可选）",
-                value="",
-                key="rec_fok",
-                help="同一算子、设备下区分不同特征模式/样本批次；与导出、训练筛选、模型主键一致。留空表示未标注。",
+            st.caption(
+                "**feature_order_key** 将根据当前 `params` 自动计算（与训练时特征列顺序一致），无需手填。"
+                " 可在下方展开区覆盖。"
             )
         with c2:
             st.text_area(
@@ -145,22 +143,56 @@ def main() -> None:
                 key="record_params",
             )
             latency = st.number_input("latency (ms)", min_value=0.0, value=1.452, format="%.6f")
+        with st.expander("高级：手动指定 feature_order_key（默认自动生成）", expanded=False):
+            manual_fok = st.text_input(
+                "覆盖自动 key（留空则仍自动生成）",
+                value="",
+                key="rec_fok_manual",
+            )
+            unlabeled = st.checkbox(
+                "写入为未标注（NULL，不参与自动生成）",
+                value=False,
+                key="rec_unlabeled",
+                help="与旧数据「仅未标注」导出/训练兼容；一般不需要勾选。",
+            )
         if st.button("提交"):
             try:
                 params = json.loads(st.session_state.record_params)
                 if not isinstance(params, dict):
                     raise ValueError("params 必须是 JSON 对象")
-                fok = rec_fok.strip() or None
-                rid, fit_res = add_record_maybe_autofit(
-                    conn,
-                    op_name,
-                    device,
-                    params,
-                    latency,
-                    auto_fit=auto_fit,
-                    feature_order_key=fok,
-                )
-                st.success(f"已写入记录 id={rid}")
+                manual = (manual_fok or "").strip()
+                if unlabeled:
+                    rid, fk_used, fit_res = add_record_maybe_autofit(
+                        conn,
+                        op_name,
+                        device,
+                        params,
+                        latency,
+                        auto_fit=auto_fit,
+                        feature_order_key=None,
+                        auto_key_from_params=False,
+                    )
+                elif manual:
+                    rid, fk_used, fit_res = add_record_maybe_autofit(
+                        conn,
+                        op_name,
+                        device,
+                        params,
+                        latency,
+                        auto_fit=auto_fit,
+                        feature_order_key=manual,
+                        auto_key_from_params=False,
+                    )
+                else:
+                    rid, fk_used, fit_res = add_record_maybe_autofit(
+                        conn,
+                        op_name,
+                        device,
+                        params,
+                        latency,
+                        auto_fit=auto_fit,
+                    )
+                st.success(f"已写入记录 id={rid}，feature_order_key=`{fk_used}`")
                 if fit_res is not None:
                     ok, msg = fit_res
                     if ok:

@@ -4,6 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from ocm.keys import make_feature_order_key
+
+
+def derive_feature_order_key_from_params(
+    params: dict[str, Any], *, merge_derived: bool = True
+) -> str:
+    """
+    与训练管线一致：可选合并衍生特征后，对单层特征名做有序并集，再生成稳定 key。
+    用于录入时自动写入 records.feature_order_key，无需手填。
+    """
+    p = dict(params)
+    if merge_derived:
+        for k, v in optional_derived_features(p).items():
+            p.setdefault(k, v)
+    names = union_feature_names_from_params_list([p])
+    return make_feature_order_key(names)
+
 
 def flatten_params_for_export(params: dict[str, Any]) -> dict[str, Any]:
     """One-level flatten for CSV export (includes stride columns and bool as 0/1)."""

@@ -34,7 +34,7 @@
 | `device` | TEXT | 目标硬件标识 | `"NVIDIA_RTX_4090"` |
 | `params` | TEXT (JSON) | **算法参数与内存状态的完整集合** | `{"N":1, "C":64, "is_contiguous":true, "memory_stride":[64,1]}` |
 | `latency` | REAL | 实际执行的计算用时（目标预测值 $Y$） | `1.452` (ms) |
-| `feature_order_key` | TEXT | 可选。用户自定义的**样本批次/特征模式标签**，与训练筛选、导出、`models` 主键一致；`NULL` 表示未标注。 |
+| `feature_order_key` | TEXT | 默认在录入时由 **`params` 自动推导**（与训练特征展开一致）；也可 API 手填或 `NULL`（未标注）。 |
 
 ### 2. 模型载体表 (`models`)
 同一 `(op_name, device)` 下可并存**多个**模型，由 **`feature_order_key`** 区分（与训练得到的特征列序列一一对应；由 `feature_order` 列表经 `make_feature_order_key` 得到稳定字符串）。
@@ -144,7 +144,7 @@ streamlit run app.py
 
 | 标签页 | 用途 |
 | :--- | :--- |
-| **录入数据** | 填写 `op_name`、`device`、可选 **`feature_order_key`**（区分样本批次/特征模式）、`params`（JSON）与 `latency`（ms）。录入模式二选一：仅写入，或写入后按**同一 key** 筛选样本自动训练。 |
+| **录入数据** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）；**feature_order_key 由 params 自动生成**。高级选项可手填覆盖或写入未标注（NULL）。录入模式：仅写入，或写入后按**本条记录的 key** 筛选样本自动训练。 |
 | **手动训练** | 选择 `(op_name, device)` 与**训练样本范围**：全部、仅未标注（`feature_order_key` 为空），或某一 key。 |
 | **导出 CSV** | 选择 `(op_name, device)` 与 **feature_order_key 范围**（全部 / 仅未标注 / 某一 key）。CSV 含 `record_id`、`feature_order_key` 与展平后的参数列。 |
 | **模型干预** | 粘贴离线得到的 `model_payload`（`booster.save_raw('json')` 的文本）与 **`feature_order`**（JSON 字符串数组），覆盖数据库中的模型。 |
@@ -155,7 +155,7 @@ streamlit run app.py
 - **仅录入**：直接调用 `insert_record(...)`，或 `add_record_maybe_autofit(..., auto_fit=False)`（默认即为不训练）。
 - **录入并自动训练**：`add_record_maybe_autofit(..., auto_fit=True)`，或在多条 `insert_record` 之后调用 `fit_and_store_model(...)`。
 - **params 模板**：`list_param_templates`、`get_param_template_by_name`、`save_param_template`、`delete_param_template`（名称唯一，同名保存则覆盖 `params`）。
-- **多模型 / 特征模式**：`insert_record(..., feature_order_key=...)`；`fit_and_store_model(..., feature_order_key=...)` 或 `unlabeled_only=True`；`predict_latency(..., feature_order_key=...)`；`list_models_for_op_device`、`get_model_row`、`make_feature_order_key`。
+- **多模型 / 特征模式**：`insert_record` 默认从 `params` 自动计算 `feature_order_key`（`derive_feature_order_key_from_params`），返回 `(row_id, key)`；`fit_and_store_model(..., feature_order_key=...)` 或 `unlabeled_only=True`；`predict_latency(..., feature_order_key=...)`；`list_models_for_op_device`、`get_model_row`、`make_feature_order_key`。
 
 在**项目根目录**下将当前目录加入 `PYTHONPATH`，或使用 `pip install -e .`（若已配置可编辑安装）后导入 `ocm`：
 
@@ -170,14 +170,15 @@ from ocm.inference import predict_latency
 
 conn = get_connection()  # 默认 data/ocm.sqlite3
 init_db(conn)
-insert_record(conn, 'nn::matmul_row_major_fp32', 'GPU',
+_, fk = insert_record(conn, 'nn::matmul_row_major_fp32', 'GPU',
     {'M': 128, 'N': 256, 'K': 512, 'is_contiguous': True, 'memory_stride': [512, 1]}, 0.5)
 insert_record(conn, 'nn::matmul_row_major_fp32', 'GPU',
     {'M': 256, 'N': 256, 'K': 512, 'is_contiguous': True, 'memory_stride': [512, 1]}, 0.9)
-ok, msg = fit_and_store_model(conn, 'nn::matmul_row_major_fp32', 'GPU')
+ok, msg = fit_and_store_model(conn, 'nn::matmul_row_major_fp32', 'GPU', feature_order_key=fk)
 print(ok, msg)
 print(predict_latency(conn, 'nn::matmul_row_major_fp32', 'GPU',
-    {'M': 200, 'N': 200, 'K': 400, 'is_contiguous': True, 'memory_stride': [400, 1]}))
+    {'M': 200, 'N': 200, 'K': 400, 'is_contiguous': True, 'memory_stride': [400, 1]},
+    feature_order_key=fk))
 conn.close()
 "
 ```

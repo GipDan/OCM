@@ -110,7 +110,22 @@ def insert_record(
     params: dict[str, Any],
     latency: float,
     feature_order_key: str | None = None,
-) -> int:
+    *,
+    auto_key_from_params: bool = True,
+) -> tuple[int, str | None]:
+    """
+    写入一条 record。默认根据 params 自动计算 feature_order_key（与训练特征展开一致）；
+    若显式传入 feature_order_key 则使用该值；若传入 auto_key_from_params=False 且未传 key，则存 NULL（未标注）。
+    返回 (row_id, 实际写入的 feature_order_key)。
+    """
+    from ocm.features import derive_feature_order_key_from_params
+
+    if feature_order_key is not None:
+        fk: str | None = feature_order_key
+    elif auto_key_from_params:
+        fk = derive_feature_order_key_from_params(params)
+    else:
+        fk = None
     cur = conn.execute(
         """
         INSERT INTO records (op_name, device, params, latency, feature_order_key)
@@ -121,11 +136,11 @@ def insert_record(
             device,
             json.dumps(params, ensure_ascii=False, sort_keys=True),
             float(latency),
-            feature_order_key,
+            fk,
         ),
     )
     conn.commit()
-    return int(cur.lastrowid)
+    return int(cur.lastrowid), fk
 
 
 def fetch_records(

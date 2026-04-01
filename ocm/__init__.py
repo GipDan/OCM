@@ -17,7 +17,11 @@ from ocm.database import (
     save_param_template,
     upsert_model,
 )
-from ocm.features import params_to_feature_row, build_training_matrix
+from ocm.features import (
+    build_training_matrix,
+    derive_feature_order_key_from_params,
+    params_to_feature_row,
+)
 from ocm.keys import make_feature_order_key
 from ocm.train import MIN_SAMPLES_DEFAULT, fit_and_store_model
 from ocm.inference import predict_latency
@@ -41,6 +45,7 @@ __all__ = [
     "delete_param_template",
     "make_feature_order_key",
     "params_to_feature_row",
+    "derive_feature_order_key_from_params",
     "build_training_matrix",
     "MIN_SAMPLES_DEFAULT",
     "fit_and_store_model",
