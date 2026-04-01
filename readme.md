@@ -190,3 +190,83 @@ conn.close()
 ### 4. 测试目录说明
 
 `test/OCMv1.py` 为可选入口脚本（将项目根加入 `sys.path` 后可配合 `streamlit run app.py` 使用）；架构说明与操作指引以仓库根目录 **`readme.md`**（本文）为准。
+
+---
+
+## 八、真实 Benchmark 与训练评估脚本
+
+本仓库当前已补充一套 **基于真实 GPU 实测** 的样本采集与训练评估流程，默认面向 `NVIDIA_A100_80GB_PCIe`。
+
+### 1. 真实样本采集脚本
+
+脚本路径：`scripts/benchmark_real_records.py`
+
+用途：
+* 使用 `torch.cuda.Event` 在真实 CUDA 设备上对一组算子 case 做计时。
+* 仅将通过稳定性阈值（`cv <= max_cv`）的样本写入 `records`。
+* 自动在 `params.benchmark_meta` 中写入测量来源、GPU 名称、重复次数、统计值、Torch/CUDA/cuDNN 版本等元信息。
+* 对已存在的同语义样本做去重，避免因重复测量把同一个 case 多次写入数据库。
+
+运行示例（建议在含 PyTorch 的环境中执行）：
+
+```bash
+cd /path/to/OCM
+conda run -n pytorch python scripts/benchmark_real_records.py \
+  --device-index 1 \
+  --warmup 20 \
+  --repeats 50 \
+  --max-cv 0.10
+```
+
+仅做测量与稳定性检查、不写库：
+
+```bash
+cd /path/to/OCM
+conda run -n pytorch python scripts/benchmark_real_records.py \
+  --dry-run \
+  --device-index 1 \
+  --warmup 10 \
+  --repeats 20 \
+  --max-cv 0.15
+```
+
+### 2. 训练 / 测试划分与模型评估脚本
+
+脚本路径：`scripts/evaluate_real_train_test.py`
+
+用途：
+* 仅筛选 `records` 中带 `benchmark_meta.source == "real_pytorch_cuda_event"` 的真实样本。
+* 按仓库原始设计，以 `(op_name, device, feature_order_key)` 为粒度做训练。
+* 对样本数不少于 3 的组做确定性 train/test 划分。
+* 输出每组的训练集 id、测试集 id、逐条测试预测结果与整体指标。
+* 可选将可评估组用全量真实样本重新训练并写入 `models`。
+
+运行示例：
+
+```bash
+cd /path/to/OCM
+conda run -n ocm python scripts/evaluate_real_train_test.py --store-models
+```
+
+该脚本会生成 JSON 报告：
+
+* `reports/real_train_test_report.json`
+
+报告中包含：
+* `overall_metrics`
+* `evaluated_groups`
+* `skipped_groups`
+* `stored_models`
+
+### 3. 当前新增内容说明
+
+本次补充主要包含：
+* 真实 A100 benchmark 样本，写入 `data/ocm.sqlite3`
+* 真实样本采集脚本 `scripts/benchmark_real_records.py`
+* 训练/测试评估脚本 `scripts/evaluate_real_train_test.py`
+* 一份最新评估报告 `reports/real_train_test_report.json`
+
+说明：
+* 旧的非实测样本生成脚本已移除，不再作为当前流程的一部分。
+* 当前数据库中原仓库自带示例数据仍保留。
+* 新增样本与训练模型以真实 A100 测量数据为主。
