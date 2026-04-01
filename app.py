@@ -1,0 +1,182 @@
+"""
+Streamlit 全生命周期管理：录入、自动训练、导出 CSV、模型覆盖、推理试算。
+运行：在项目根目录执行  streamlit run app.py
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import sys
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ocm.database import (  # noqa: E402
+    DEFAULT_DB_PATH,
+    export_records_flat_csv_rows,
+    get_connection,
+    init_db,
+    list_op_device_pairs,
+    upsert_model,
+)
+from ocm.inference import predict_latency, predict_with_booster_json  # noqa: E402
+from ocm.train import fit_and_store_model  # noqa: E402
+from ocm.workflow import add_record_maybe_autofit  # noqa: E402
+
+
+def main() -> None:
+    st.set_page_config(page_title="OCM 算子代价模型", layout="wide")
+    st.title("硬件感知算子代价模型 (OCM)")
+
+    with st.sidebar:
+        st.subheader("数据库")
+        db_path = st.text_input("SQLite 路径", value=str(DEFAULT_DB_PATH))
+        conn = get_connection(db_path)
+        init_db(conn)
+        st.caption("零文件架构：模型以 JSON 文本存于 `models.model_payload`。")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["录入与自动训练", "手动训练", "导出 CSV", "模型干预", "推理试算"]
+    )
+
+    with tab1:
+        st.markdown("录入 benchmark 样本；可选在样本数达到阈值后自动拟合 XGBoost。")
+        c1, c2 = st.columns(2)
+        with c1:
+            op_name = st.text_input("op_name", value="nn::conv2d_nchw_fp32")
+            device = st.text_input("device", value="NVIDIA_RTX_4090")
+        with c2:
+            params_json = st.text_area(
+                "params (JSON)",
+                value='{"N": 1, "C": 64, "H": 32, "W": 32, "is_contiguous": true, "memory_stride": [64, 1]}',
+                height=160,
+            )
+            latency = st.number_input("latency (ms)", min_value=0.0, value=1.452, format="%.6f")
+        auto_fit = st.checkbox("录入后自动训练（样本数 ≥ 2）", value=True)
+        if st.button("写入 records"):
+            try:
+                params = json.loads(params_json)
+                if not isinstance(params, dict):
+                    raise ValueError("params 必须是 JSON 对象")
+                rid, fit_res = add_record_maybe_autofit(
+                    conn, op_name, device, params, latency, auto_fit=auto_fit
+                )
+                st.success(f"已写入记录 id={rid}")
+                if fit_res is not None:
+                    ok, msg = fit_res
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.info(msg)
+            except Exception as e:
+                st.error(str(e))
+
+    with tab2:
+        st.markdown("针对已有样本手动触发训练（不新增记录）。")
+        pairs = list_op_device_pairs(conn)
+        if not pairs:
+            st.warning("暂无 records，请先在「录入」页添加数据。")
+        else:
+            labels = [f"{a} @ {b}" for a, b in pairs]
+            idx = st.selectbox("选择 (op_name, device)", range(len(labels)), format_func=lambda i: labels[i])
+            op_sel, dev_sel = pairs[idx]
+            st.text(f"op_name: {op_sel}")
+            st.text(f"device: {dev_sel}")
+            if st.button("执行训练"):
+                ok, msg = fit_and_store_model(conn, op_sel, dev_sel)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.warning(msg)
+
+    with tab3:
+        st.markdown("将某一算子在设备上的全部记录导出为展平 CSV。")
+        pairs = list_op_device_pairs(conn)
+        if not pairs:
+            st.warning("暂无数据可导出。")
+        else:
+            labels = [f"{a} @ {b}" for a, b in pairs]
+            idx = st.selectbox("导出对象", range(len(labels)), format_func=lambda i: labels[i], key="ex")
+            op_sel, dev_sel = pairs[idx]
+            header, rows = export_records_flat_csv_rows(conn, op_sel, dev_sel)
+            if header:
+                df = pd.DataFrame(rows, columns=header)
+                csv_buf = io.StringIO()
+                df.to_csv(csv_buf, index=False)
+                st.download_button(
+                    "下载 CSV",
+                    data=csv_buf.getvalue().encode("utf-8"),
+                    file_name=f"ocm_{op_sel.replace('::', '_')}_{dev_sel}.csv",
+                    mime="text/csv",
+                )
+                st.dataframe(df, use_container_width=True)
+
+    with tab4:
+        st.markdown(
+            "将离线训练得到的 **model_payload**（XGBoost `save_raw('json')` 文本）"
+            "与 **feature_order**（JSON 数组，特征名顺序与训练时一致）粘贴覆盖数据库。"
+        )
+        op_m = st.text_input("op_name", value="nn::conv2d_nchw_fp32", key="m_op")
+        dev_m = st.text_input("device", value="NVIDIA_RTX_4090", key="m_dev")
+        payload = st.text_area("model_payload（JSON 字符串）", height=200)
+        feat_order = st.text_area(
+            'feature_order（JSON 数组，如 ["C","H","W","is_contiguous","memory_stride_0"]）',
+            height=100,
+        )
+        if st.button("覆盖 models 表"):
+            try:
+                order = json.loads(feat_order)
+                if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+                    raise ValueError("feature_order 必须是非空字符串数组")
+                upsert_model(conn, op_m, dev_m, payload.strip(), order)
+                st.success("已更新模型与特征顺序。")
+            except Exception as e:
+                st.error(str(e))
+
+    with tab5:
+        st.markdown("编译器侧推理：查询 `models`，有则 `predict`，无则返回 None。")
+        op_p = st.text_input("op_name", value="nn::conv2d_nchw_fp32", key="p_op")
+        dev_p = st.text_input("device", value="NVIDIA_RTX_4090", key="p_dev")
+        params_infer = st.text_area(
+            "params (JSON)",
+            value='{"N": 1, "C": 64, "H": 32, "W": 32, "is_contiguous": true, "memory_stride": [64, 1]}',
+            height=140,
+            key="p_params",
+        )
+        if st.button("预测"):
+            try:
+                pdict = json.loads(params_infer)
+                pred = predict_latency(conn, op_p, dev_p, pdict)
+                if pred is None:
+                    st.info("无模型：返回 None（可回退到真实 Benchmark）。")
+                else:
+                    st.metric("预测 latency (ms)", f"{pred:.6f}")
+            except Exception as e:
+                st.error(str(e))
+
+        st.divider()
+        st.markdown("**不经过数据库**：手动粘贴 model_payload + feature_order 试算。")
+        pay2 = st.text_area("model_payload", height=120, key="p2_pay")
+        ord2 = st.text_area("feature_order JSON", height=80, key="p2_ord")
+        if st.button("直接预测"):
+            try:
+                order = json.loads(ord2)
+                pdict = json.loads(params_infer)
+                if not isinstance(order, list):
+                    raise ValueError("feature_order 无效")
+                val = predict_with_booster_json(pay2.strip(), order, pdict)
+                st.metric("预测 latency (ms)", f"{val:.6f}")
+            except Exception as e:
+                st.error(str(e))
+
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()

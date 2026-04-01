@@ -1,0 +1,13 @@
+# 在已有 conda 环境 ocm 中同步依赖：
+#   conda env update -n ocm -f environment.yml --prune
+# 或新建环境（会命名为文件中的 name）：
+#   conda env create -f environment.yml
+
+name: ocm
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+      - -r requirements.txt
