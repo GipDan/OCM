@@ -117,20 +117,35 @@
 
 ## 七、操作指导（本仓库实现）
 
-以下说明对应仓库根目录下的 Python 包 `ocm/`、`app.py`（Streamlit）及默认 SQLite 路径。实现中在 `models` 表增加了 **`feature_order`** 字段（JSON 数组），用于保存训练时的特征列顺序，保证推理与训练对齐；其余设计与上文一致。
+以下说明对应仓库根目录下的 Python 包 `ocm/`、`app.py`（Streamlit）及默认 SQLite 路径 **`data/ocm.sqlite3`**。`models` 表含 **`feature_order`**（JSON 数组），与 `feature_order_key` 主键一起保证推理与训练对齐。
 
-### 1. 环境与依赖
+### 1. 环境配置
 
-在已创建的 Conda 环境（例如名为 `ocm`）中，于**项目根目录** `ops_cost_model_database/` 执行：
+**方式 A：已有 Conda 环境（推荐）**
 
 ```bash
+# 若尚未创建环境，可先：conda create -n ocm python=3.11 -y
 conda activate ocm
+cd /path/to/ops_cost_model_database
 pip install -r requirements.txt
 ```
 
-依赖主要包括：`xgboost`、`scikit-learn`（`XGBRegressor` 需要）、`streamlit`、`pandas`、`numpy`。也可使用根目录的 `environment.yml` 通过 `conda env update -n ocm -f environment.yml` 同步（需在项目根目录执行）。
+**方式 B：用 `environment.yml` 同步依赖（在项目根目录执行）**
 
-### 2. 启动 Web 管理界面（Streamlit）
+```bash
+conda env update -n ocm -f environment.yml --prune
+conda activate ocm
+```
+
+**依赖说明**：`xgboost`、`scikit-learn`（`XGBRegressor` 必需）、`streamlit`、`pandas`、`numpy`。
+
+**运行前**：所有命令均在项目根目录 `ops_cost_model_database/` 下执行；使用 Python API 时需让解释器能找到 `ocm` 包（见下文 `PYTHONPATH`）。
+
+---
+
+### 2. Web 界面使用（Streamlit）
+
+**启动**
 
 ```bash
 cd /path/to/ops_cost_model_database
@@ -138,39 +153,151 @@ conda activate ocm
 streamlit run app.py
 ```
 
-浏览器打开终端提示的本地地址（一般为 `http://localhost:8501`）。侧栏可修改 **SQLite 数据库文件路径**；默认库文件为项目下 **`data/ocm.sqlite3`**（若不存在会在首次写入时自动创建目录与表结构）。**params 模板**存于当前库文件的 `param_templates` 表，换库即换模板列表。
+浏览器打开终端提示的地址（一般为 `http://localhost:8501`）。
 
-界面分为多个标签页，建议按下列顺序使用：
+**侧栏**
 
-| 标签页 | 用途 |
+- **SQLite 路径**：可改为任意 `.sqlite3` 文件；默认 `data/ocm.sqlite3`，首次写入会自动建库、建表。
+- 会显示当前库中 **params 模板**数量（模板存在当前库的 `param_templates` 表里，换库即换模板）。
+
+**各标签页简要说明**
+
+| 标签页 | 做什么 |
 | :--- | :--- |
-| **录入数据** | 填写 `op_name`、`device`、`params`（JSON）与 `latency`（ms）；**feature_order_key 由 params 自动生成**。高级选项可手填覆盖或写入未标注（NULL）。录入模式：仅写入，或写入后按**本条记录的 key** 筛选样本自动训练。 |
-| **手动训练** | 选择 `(op_name, device)` 与**训练样本范围**：全部、仅未标注（`feature_order_key` 为空），或某一 key。 |
-| **导出 CSV** | 选择 `(op_name, device)` 与 **feature_order_key 范围**（全部 / 仅未标注 / 某一 key）。CSV 含 `record_id`、`feature_order_key` 与展平后的参数列。 |
-| **模型干预** | 粘贴离线得到的 `model_payload`（`booster.save_raw('json')` 的文本）与 **`feature_order`**（JSON 字符串数组），覆盖数据库中的模型。 |
-| **推理试算** | 若同一 `(op_name, device)` 存在多个模型，需选择 **feature_order_key** 变体；仅一个模型时可自动选用。支持 params 模板加载与保存。 |
-| **数据管理** | 按条件预览 `records`；按 id 或列表选择后**修改**（params JSON、自动/手动 key、未标注）；**删除**（需确认）。 |
+| **录入数据** | 填 `op_name`、`device`、`params`（JSON）、`latency`（ms）。**录入模式**：仅写入库，或写入后自动训练。`feature_order_key` 默认由 `params` **自动计算**；展开「高级」可手填覆盖、或写入未标注（NULL）。可用 **params 模板**加载/保存 JSON。 |
+| **手动训练** | 不新增记录。选 `(op_name, device)` 与 **样本范围**：全部样本、仅未标注、或某一 `feature_order_key`，再点执行训练。 |
+| **导出 CSV** | 选 `(op_name, device)` 与 **feature_order_key 范围**（全部 / 仅未标注 / 某一 key），下载展平后的 CSV（含 `record_id`、`feature_order_key` 等列）。 |
+| **模型干预** | 粘贴离线训练得到的 `model_payload`（`save_raw('json')` 文本）与 `feature_order`（JSON 数组），覆盖库中对应键下的模型。 |
+| **推理试算** | 填 `op_name`、`device`、`params`；若该设备上有多套模型，需选 **feature_order_key** 变体。支持 params 模板。亦可仅用粘贴的 booster 做「直接预测」试算。 |
+| **数据管理** | 按 `op_name` / `device` / 条数上限筛选 **预览**。表格为 **可编辑**：完整展示 **`params`（JSON 字符串）**，改单元格后点 **「应用表格修改」** 批量写回。列 **置空key** 表示将该行 `feature_order_key` 存为 NULL；**删除此行** 勾选后同一按钮会删除对应行。 |
 
-### 3. Python API 调用示例
+---
 
-- **仅录入**：直接调用 `insert_record(...)`，或 `add_record_maybe_autofit(..., auto_fit=False)`（默认即为不训练）。
-- **录入并自动训练**：`add_record_maybe_autofit(..., auto_fit=True)`，或在多条 `insert_record` 之后调用 `fit_and_store_model(...)`。
-- **params 模板**：`list_param_templates`、`get_param_template_by_name`、`save_param_template`、`delete_param_template`（名称唯一，同名保存则覆盖 `params`）。
-- **多模型 / 特征模式**：`insert_record` 默认从 `params` 自动计算 `feature_order_key`（`derive_feature_order_key_from_params`），返回 `(row_id, key)`；`fit_and_store_model(..., feature_order_key=...)` 或 `unlabeled_only=True`；`predict_latency(..., feature_order_key=...)`；`list_models_for_op_device`、`get_model_row`、`make_feature_order_key`。
-- **记录维护**：`list_records`、`get_record_by_id`、`update_record`、`delete_record`。
+### 3. Python API：录入、训练、导出 CSV、推理
 
-在**项目根目录**下将当前目录加入 `PYTHONPATH`，或使用 `pip install -e .`（若已配置可编辑安装）后导入 `ocm`：
+在脚本或 REPL 中，先将项目根加入路径（任选其一）：
+
+```bash
+export PYTHONPATH="/path/to/ops_cost_model_database:$PYTHONPATH"
+```
+
+或在代码里：
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("/path/to/ops_cost_model_database").resolve()))
+```
+
+#### 3.1 录数据（写入 `records`）
+
+**方式一：`insert_record`（返回 `(行 id, 实际 feature_order_key)`）**
+
+- 默认根据 `params` **自动计算** `feature_order_key`（与训练特征展开一致）。
+- `feature_order_key="某字符串"` + `auto_key_from_params=False`：强制使用该标签。
+- `feature_order_key=None` + `auto_key_from_params=False`：写入 **NULL**（未标注）。
+
+```python
+from ocm.database import get_connection, init_db, insert_record
+
+conn = get_connection()
+init_db(conn)
+
+row_id, fk = insert_record(
+    conn,
+    "nn::matmul_row_major_fp32",
+    "GPU",
+    {"M": 128, "N": 256, "K": 512, "is_contiguous": True, "memory_stride": [512, 1]},
+    0.5,
+)
+# 第二条样本（同一特征模式则 fk 通常相同，仍以返回为准）
+insert_record(
+    conn,
+    "nn::matmul_row_major_fp32",
+    "GPU",
+    {"M": 256, "N": 256, "K": 512, "is_contiguous": True, "memory_stride": [512, 1]},
+    0.9,
+)
+conn.close()
+```
+
+**方式二：`add_record_maybe_autofit`（录入后可选自动训练）**
+
+- `auto_fit=False`（默认）：只插入。
+- `auto_fit=True`：插入后用 **本条记录对应的 `feature_order_key`** 作为筛选条件调用 `fit_and_store_model`（同 key 下样本数 ≥ 2 才可能成功）。
+
+```python
+from ocm.workflow import add_record_maybe_autofit
+
+rid, fk, fit_res = add_record_maybe_autofit(
+    conn, "nn::matmul_row_major_fp32", "GPU", params_dict, 0.5, auto_fit=True
+)
+```
+
+#### 3.2 训练（写入 `models`）
+
+在已有样本上训练（不依赖刚才是 Web 还是 API 录入）：
+
+```python
+from ocm.train import fit_and_store_model
+
+# 只使用 feature_order_key 等于 fk 的样本行
+ok, msg = fit_and_store_model(conn, "nn::matmul_row_major_fp32", "GPU", feature_order_key=fk)
+
+# 使用全部样本（不按 key 过滤）
+ok, msg = fit_and_store_model(conn, "nn::matmul_row_major_fp32", "GPU")
+
+# 仅使用「未标注」样本（feature_order_key IS NULL）
+ok, msg = fit_and_store_model(conn, "nn::matmul_row_major_fp32", "GPU", unlabeled_only=True)
+```
+
+`fit_and_store_model` 内部样本数默认至少 **2** 条（`MIN_SAMPLES_DEFAULT`）。
+
+#### 3.3 导出 CSV（程序化）
+
+```python
+import csv
+from ocm.database import export_records_flat_csv_rows
+
+header, rows = export_records_flat_csv_rows(
+    conn,
+    "nn::matmul_row_major_fp32",
+    "GPU",
+    feature_order_key=fk,          # 某一 key；不传后两个关键字参数则导出该 op+device 全部
+    # unlabeled_only=True,         # 仅未标注时可打开
+)
+with open("export.csv", "w", newline="", encoding="utf-8") as f:
+    w = csv.writer(f)
+    w.writerow(header)
+    w.writerows(rows)
+```
+
+#### 3.4 推理
+
+```python
+from ocm.inference import predict_latency
+
+pred = predict_latency(
+    conn,
+    "nn::matmul_row_major_fp32",
+    "GPU",
+    {"M": 200, "N": 200, "K": 400, "is_contiguous": True, "memory_stride": [400, 1]},
+    feature_order_key=fk,   # 与训练保存的模型一致；若该 op+device 只有一个模型，可省略由库自动选
+)
+# pred 为 float（ms）或 None（无模型或无法唯一确定变体时）
+```
+
+**完整串联示例（与 Web 共用同一库文件时路径一致即可）**
 
 ```bash
 cd /path/to/ops_cost_model_database
 export PYTHONPATH="$PWD:$PYTHONPATH"
 python -c "
-from pathlib import Path
 from ocm.database import get_connection, init_db, insert_record
 from ocm.train import fit_and_store_model
 from ocm.inference import predict_latency
 
-conn = get_connection()  # 默认 data/ocm.sqlite3
+conn = get_connection()
 init_db(conn)
 _, fk = insert_record(conn, 'nn::matmul_row_major_fp32', 'GPU',
     {'M': 128, 'N': 256, 'K': 512, 'is_contiguous': True, 'memory_stride': [512, 1]}, 0.5)
@@ -185,8 +312,12 @@ conn.close()
 "
 ```
 
-推理时若 **`models` 中无对应模型**（含多模型时未指定 `feature_order_key` 且无法唯一确定），`predict_latency` 返回 `None`，编译器侧可回退到真实 Benchmark。
+推理时若 **没有匹配的模型**（或同一 `(op_name, device)` 下有多模型却未指定 `feature_order_key`），`predict_latency` 返回 **`None`**，可回退到真实 Benchmark。
+
+**其它 API**：params 模板（`list_param_templates`、`save_param_template` 等）；记录维护（`list_records`、`update_record`、`delete_record`）；多模型列表（`list_models_for_op_device`）。详见 `ocm/__init__.py` 导出列表。
+
+---
 
 ### 4. 测试目录说明
 
-`test/OCMv1.py` 为可选入口脚本（将项目根加入 `sys.path` 后可配合 `streamlit run app.py` 使用）；架构说明与操作指引以仓库根目录 **`readme.md`**（本文）为准。
+`test/OCMv1.py` 可将项目根加入 `sys.path` 后配合 `streamlit run app.py` 使用。完整架构与操作说明以本 **`readme.md`** 为准。
