@@ -5,7 +5,12 @@ import sqlite3
 
 import torch
 
-from .benchmark_ops import build_cases_for_specs, print_available_ops, resolve_operator_keys
+from .benchmark_ops import (
+    build_cases_for_sample_ids,
+    plan_sample_ids_for_specs,
+    print_available_ops,
+    resolve_operator_keys,
+)
 from .common import (
     DEFAULT_DB_PATH,
     DEFAULT_LIMIT_PER_OP,
@@ -14,11 +19,14 @@ from .common import (
     DEFAULT_WARMUP,
     choose_device_index,
     collect_results,
+    existing_keys,
+    fetch_existing_benchmark_sample_ids,
     fetch_record_summary,
     init_db,
     insert_results,
     normalize_device_name,
     print_collection_summary,
+    semantic_record_key,
     verify_inserted,
 )
 
@@ -34,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--all-ops", action="store_true", help="显式跑所有已注册算子")
     parser.add_argument("--list-ops", action="store_true", help="列出所有可用算子并退出")
     parser.add_argument("--limit-per-op", type=int, default=DEFAULT_LIMIT_PER_OP, help="每个算子最多采样多少条 case")
+    parser.add_argument("--top-up-to", type=int, default=None, help="只补当前算子缺失样本，直到库内总数达到该值")
+    parser.add_argument("--rerun-existing", action="store_true", help="即使 sample_id 已存在，也重新测量这些 case")
     parser.add_argument("--dry-run", action="store_true", help="只测量和校验，不写数据库")
     return parser
 
@@ -49,6 +59,8 @@ def main() -> int:
         raise ValueError("warmup 至少 1，repeats 至少 5")
     if args.limit_per_op < 1:
         raise ValueError("limit-per-op 至少 1")
+    if args.top_up_to is not None and args.top_up_to < 1:
+        raise ValueError("top-up-to 至少 1")
 
     selected_ops = resolve_operator_keys(args.op, allow_all=args.all_ops)
 
@@ -61,7 +73,32 @@ def main() -> int:
     gpu_name = torch.cuda.get_device_name(device_index)
     device_name = normalize_device_name(gpu_name)
 
-    cases = build_cases_for_specs(device, selected_ops, args.limit_per_op)
+    conn = sqlite3.connect(args.db_path)
+    try:
+        init_db(conn)
+        existing_sample_ids = fetch_existing_benchmark_sample_ids(
+            conn,
+            device=device_name,
+            op_keys=selected_ops,
+        )
+        existing_semantic_keys = existing_keys(conn)
+    finally:
+        conn.close()
+
+    sample_ids_by_op = plan_sample_ids_for_specs(
+        selected_ops,
+        limit_per_op=args.limit_per_op,
+        existing_sample_ids_by_op=existing_sample_ids,
+        top_up_to=args.top_up_to,
+        rerun_existing=args.rerun_existing,
+    )
+    cases = build_cases_for_sample_ids(device, sample_ids_by_op)
+    if not args.rerun_existing:
+        cases = [
+            case
+            for case in cases
+            if semantic_record_key(case.op_name, device_name, case.params) not in existing_semantic_keys
+        ]
     results, skipped = collect_results(
         cases,
         device_index=device_index,
@@ -78,6 +115,14 @@ def main() -> int:
         results=results,
         skipped=skipped,
     )
+    print("\n计划采样的 sample_id:")
+    for op_key in selected_ops:
+        existing_count = len(existing_sample_ids.get(op_key, set()))
+        scheduled = sample_ids_by_op.get(op_key, [])
+        print(
+            f"  {op_key}: existing={existing_count}, scheduled={len(scheduled)}, "
+            f"sample_ids={scheduled}"
+        )
 
     if args.dry_run:
         print("\nDry run 完成，未写数据库。")

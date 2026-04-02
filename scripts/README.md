@@ -8,12 +8,18 @@
   真实算子采样与写入 `records` 的命令行入口。
 - `evaluate_real_train_test.py`
   对真实采样数据做 train/test 划分评估的命令行入口。
+- `train_real_operator.py`
+  对单个算子做模型训练并写入 `models`。
+- `predict_real_latency.py`
+  对单个算子做延迟预测，可直接读取某条 record 或手动传 params。
 - `real_bench/benchmark_ops.py`
   算子注册表、case 配置、builder 逻辑。后续新增算子主要改这里。
 - `real_bench/benchmark_cli.py`
   benchmark 的 CLI 参数与主流程。
 - `real_bench/evaluation.py`
   评估、分组、训练测试拆分逻辑。
+- `real_bench/model_cli.py`
+  单算子训练、模型列表、预测 CLI 逻辑。
 - `real_bench/common.py`
   公共常量、数据库写入、样本元信息、benchmark 公共函数。
 
@@ -58,6 +64,16 @@ conda run -n pytorch python scripts/benchmark_real_records.py \
   --repeats 20
 ```
 
+如果你只是想把某个算子的样本补齐到目标数量，推荐直接用：
+
+```bash
+conda run -n pytorch python scripts/benchmark_real_records.py \
+  --op matmul_row_major_fp32 \
+  --top-up-to 20 \
+  --warmup 10 \
+  --repeats 20
+```
+
 一次写入多个算子：
 
 ```bash
@@ -72,6 +88,8 @@ conda run -n pytorch python scripts/benchmark_real_records.py \
 
 - `--op` 支持重复传入，也支持逗号分隔。
 - `--limit-per-op` 控制每个算子最多采多少条 case。现在常用大算子已经预置到约 20 条。
+- `--top-up-to` 会先看数据库当前已有多少条 `sample_id`，只补差额，更适合持续补样本。
+- 默认会优先跳过当前库里已存在的 `sample_id`；如果你确实想强制重测，可加 `--rerun-existing`。
 - `--dry-run` 只测量不写库，适合先检查波动和耗时。
 - 写入时会自动跳过数据库里已经存在的同语义样本，不会重复灌同一条记录。
 - 新样本会在 `params["benchmark_meta"]` 中写入：
@@ -132,6 +150,14 @@ conda run -n ocm python scripts/evaluate_real_train_test.py \
   --report-path reports/real_train_test_report.json
 ```
 
+只看单个算子的评估：
+
+```bash
+conda run -n ocm python scripts/evaluate_real_train_test.py \
+  --op matmul_row_major_fp32 \
+  --report-path reports/matmul_fp32_eval.json
+```
+
 如果想在评估后顺便把模型写进数据库：
 
 ```bash
@@ -147,7 +173,36 @@ conda run -n ocm python scripts/evaluate_real_train_test.py --store-models
 - `--store-models`
   评估完成后对可评估组用全量样本训练并写入 `models`
 
-## 4. 直接训练模型
+## 4. 单算子训练
+
+推荐直接用训练入口，不用再手写 Python 片段。
+
+先看这个算子有哪些样本分组：
+
+```bash
+cd /home/dkw/OCM
+conda run -n ocm python scripts/train_real_operator.py \
+  --op matmul_row_major_fp32 \
+  --list-groups
+```
+
+训练该算子的全部分组并写入 `models`：
+
+```bash
+conda run -n ocm python scripts/train_real_operator.py \
+  --op matmul_row_major_fp32 \
+  --report-path reports/train_matmul_fp32.json
+```
+
+如果你只想训练某一个 `feature_order_key`：
+
+```bash
+conda run -n ocm python scripts/train_real_operator.py \
+  --op matmul_row_major_fp32 \
+  --feature-order-key '["K","M","N","is_contiguous","memory_stride_0","memory_stride_1"]'
+```
+
+## 5. 直接训练模型
 
 如果你不想先跑 `evaluate_real_train_test.py`，也可以直接用项目 API 训练。
 
@@ -178,9 +233,35 @@ PY
 feature_order_key='["K","M","N","is_contiguous","memory_stride_0","memory_stride_1"]'
 ```
 
-## 5. 推理预测
+## 6. 推理预测
 
 训练完成后，可以直接从数据库加载模型做推理：
+
+推荐直接用预测入口：
+
+```bash
+cd /home/dkw/OCM
+conda run -n ocm python scripts/predict_real_latency.py \
+  --op matmul_row_major_fp32 \
+  --params-json '{"M":1024,"N":1024,"K":512,"is_contiguous":true,"memory_stride":[512,1]}'
+```
+
+如果你想直接拿某条已有 record 做预测，并同时对比真实值：
+
+```bash
+conda run -n ocm python scripts/predict_real_latency.py \
+  --record-id 71
+```
+
+如果你只想看当前这个算子有哪些模型：
+
+```bash
+conda run -n ocm python scripts/predict_real_latency.py \
+  --op matmul_row_major_fp32 \
+  --list-models
+```
+
+新的预测逻辑会优先根据 `params` 自动推断最合适的 `feature_order_key`，所以同一个算子下有多个模型时，通常不需要你手工指定。
 
 ```bash
 cd /home/dkw/OCM
@@ -211,17 +292,17 @@ PY
 
 如果一个 `(op_name, device)` 下有多个模型，而你又不指定 `feature_order_key`，`predict_latency(...)` 可能会返回 `None`。这时要显式传入目标模型的 `feature_order_key`。
 
-## 6. 推荐工作流
+## 7. 推荐工作流
 
 推荐按下面顺序做：
 
-1. 在 `pytorch` 环境里先 `--dry-run` 检查算子是否稳定。
-2. 确认没问题后正式写入 `records`。
-3. 在 `ocm` 环境里跑 `evaluate_real_train_test.py` 看泛化效果。
-4. 需要落库模型时，加 `--store-models`，或者直接调用 `fit_and_store_model(...)`。
-5. 在业务代码里通过 `predict_latency(...)` 做推理。
+1. 在 `pytorch` 环境里先 `--dry-run` 检查当前算子是否稳定。
+2. 用 `--top-up-to 20` 这类方式把现有算子样本补齐。
+3. 在 `ocm` 环境里跑 `evaluate_real_train_test.py --op ...` 看单算子泛化效果。
+4. 用 `train_real_operator.py` 把该算子的模型写入数据库。
+5. 用 `predict_real_latency.py` 直接做单算子预测或 record 回放预测。
 
-## 7. 常见问题
+## 8. 常见问题
 
 ### 为什么 benchmark 和 evaluate 不能在同一个环境里跑？
 

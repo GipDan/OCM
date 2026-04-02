@@ -89,6 +89,8 @@ def choose_device_index(requested: int | None) -> int:
 
 
 def dtype_name(dtype: torch.dtype) -> str:
+    import torch
+
     mapping = {
         torch.float32: "fp32",
         torch.float16: "fp16",
@@ -362,6 +364,40 @@ def verify_inserted(conn: sqlite3.Connection, inserted_ids: list[int]) -> None:
             raise RuntimeError(f"feature_order_key 错误: id={row_id}")
         if not isinstance(row[1], float) or row[1] <= 0:
             raise RuntimeError(f"latency 非法: id={row_id}")
+
+
+def fetch_existing_benchmark_sample_ids(
+    conn: sqlite3.Connection,
+    *,
+    device: str,
+    op_keys: list[str],
+) -> dict[str, set[int]]:
+    sample_ids_by_op = {op_key: set() for op_key in op_keys}
+    if not op_keys:
+        return sample_ids_by_op
+
+    placeholders = ",".join("?" for _ in op_keys)
+    rows = conn.execute(
+        f"""
+        SELECT op_name, params
+        FROM records
+        WHERE device = ? AND op_name IN ({placeholders})
+        ORDER BY id
+        """,
+        [device, *op_keys],
+    ).fetchall()
+    for op_name, payload in rows:
+        try:
+            params = json.loads(payload)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        meta = params.get("benchmark_meta") if isinstance(params, dict) else None
+        if not isinstance(meta, dict):
+            continue
+        sample_id = meta.get("sample_id")
+        if isinstance(sample_id, int):
+            sample_ids_by_op.setdefault(str(op_name), set()).add(int(sample_id))
+    return sample_ids_by_op
 
 
 def fetch_record_summary(conn: sqlite3.Connection, op_keys: list[str], device: str) -> list[tuple[str, int, int, int]]:

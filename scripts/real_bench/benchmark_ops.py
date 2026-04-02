@@ -537,6 +537,16 @@ MATMUL_FP32_CONFIGS = (
     dict(dtype=torch.float32, m=640, n=1536, k=320, non_contiguous=False, note="attention_ffn_mix"),
     dict(dtype=torch.float32, m=1280, n=512, k=2560, non_contiguous=False, note="projection_heavy_k"),
     dict(dtype=torch.float32, m=512, n=1280, k=2560, non_contiguous=True, note="projection_heavy_k_strided"),
+    dict(dtype=torch.float32, m=1536, n=768, k=512, non_contiguous=True, note="transformer_mlp_strided"),
+    dict(dtype=torch.float32, m=768, n=1536, k=512, non_contiguous=False, note="transformer_mlp_wide"),
+    dict(dtype=torch.float32, m=1024, n=2048, k=256, non_contiguous=False, note="mid_wide_output"),
+    dict(dtype=torch.float32, m=2048, n=1024, k=256, non_contiguous=False, note="mid_tall_input"),
+    dict(dtype=torch.float32, m=512, n=2048, k=2048, non_contiguous=False, note="heavy_k_wide"),
+    dict(dtype=torch.float32, m=2048, n=512, k=2048, non_contiguous=False, note="heavy_k_tall"),
+    dict(dtype=torch.float32, m=1536, n=1024, k=768, non_contiguous=False, note="decoder_backproj"),
+    dict(dtype=torch.float32, m=1024, n=1536, k=768, non_contiguous=False, note="decoder_proj_mid"),
+    dict(dtype=torch.float32, m=1024, n=4096, k=256, non_contiguous=True, note="wider_output_strided"),
+    dict(dtype=torch.float32, m=4096, n=1024, k=256, non_contiguous=True, note="taller_input_strided"),
 )
 
 MATMUL_FP16_CONFIGS = (
@@ -560,6 +570,16 @@ MATMUL_FP16_CONFIGS = (
     dict(dtype=torch.float16, m=512, n=1280, k=2560, non_contiguous=True, note="fp16_projection_heavy_k_strided"),
     dict(dtype=torch.float16, m=1024, n=1536, k=768, non_contiguous=False, note="fp16_decoder_proj"),
     dict(dtype=torch.float16, m=1536, n=1024, k=768, non_contiguous=False, note="fp16_decoder_backproj"),
+    dict(dtype=torch.float16, m=1536, n=768, k=512, non_contiguous=True, note="fp16_transformer_mlp_strided"),
+    dict(dtype=torch.float16, m=768, n=1536, k=512, non_contiguous=False, note="fp16_transformer_mlp_wide"),
+    dict(dtype=torch.float16, m=1024, n=2048, k=256, non_contiguous=False, note="fp16_mid_wide_output"),
+    dict(dtype=torch.float16, m=2048, n=1024, k=256, non_contiguous=False, note="fp16_mid_tall_input"),
+    dict(dtype=torch.float16, m=512, n=2048, k=2048, non_contiguous=False, note="fp16_heavy_k_wide"),
+    dict(dtype=torch.float16, m=2048, n=512, k=2048, non_contiguous=False, note="fp16_heavy_k_tall"),
+    dict(dtype=torch.float16, m=1536, n=1024, k=768, non_contiguous=True, note="fp16_decoder_backproj_strided"),
+    dict(dtype=torch.float16, m=1024, n=1536, k=768, non_contiguous=True, note="fp16_decoder_proj_mid_strided"),
+    dict(dtype=torch.float16, m=1024, n=4096, k=256, non_contiguous=True, note="fp16_wider_output_strided"),
+    dict(dtype=torch.float16, m=4096, n=1024, k=256, non_contiguous=True, note="fp16_taller_input_strided"),
 )
 
 BATCH_MATMUL_FP16_CONFIGS = (
@@ -724,12 +744,45 @@ def resolve_operator_keys(raw_ops: list[str], *, allow_all: bool) -> list[str]:
     return resolved
 
 
-def build_cases_for_specs(device: torch.device, op_keys: list[str], limit_per_op: int) -> list[BenchCase]:
-    cases: list[BenchCase] = []
+def plan_sample_ids_for_specs(
+    op_keys: list[str],
+    *,
+    limit_per_op: int,
+    existing_sample_ids_by_op: dict[str, set[int]] | None = None,
+    top_up_to: int | None = None,
+    rerun_existing: bool = False,
+) -> dict[str, list[int]]:
+    sample_ids_by_op: dict[str, list[int]] = {}
     for op_key in op_keys:
         spec = SPEC_BY_KEY[op_key]
-        limit = min(limit_per_op, len(spec.configs))
-        for sample_id, cfg in enumerate(spec.configs[:limit], start=1):
+        existing = existing_sample_ids_by_op.get(op_key, set()) if existing_sample_ids_by_op else set()
+        if top_up_to is not None and not rerun_existing:
+            desired_runs = max(0, top_up_to - len(existing))
+        else:
+            desired_runs = top_up_to if top_up_to is not None else limit_per_op
+        desired_runs = max(0, min(desired_runs, len(spec.configs)))
+        selected: list[int] = []
+        for sample_id in range(1, len(spec.configs) + 1):
+            if len(selected) >= desired_runs:
+                break
+            if not rerun_existing and sample_id in existing:
+                continue
+            selected.append(sample_id)
+        sample_ids_by_op[op_key] = selected
+    return sample_ids_by_op
+
+
+def build_cases_for_sample_ids(
+    device: torch.device,
+    sample_ids_by_op: dict[str, list[int]],
+) -> list[BenchCase]:
+    cases: list[BenchCase] = []
+    for op_key, sample_ids in sample_ids_by_op.items():
+        spec = SPEC_BY_KEY[op_key]
+        for sample_id in sample_ids:
+            if sample_id < 1 or sample_id > len(spec.configs):
+                raise ValueError(f"sample_id 超出范围: {op_key}#{sample_id:02d}")
+            cfg = spec.configs[sample_id - 1]
             op_name, params, run, output_shape, note = spec.builder(device, **cfg)
             if op_name != op_key:
                 raise RuntimeError(f"算子注册与 builder 返回不一致: expected={op_key} got={op_name}")
@@ -745,6 +798,15 @@ def build_cases_for_specs(device: torch.device, op_keys: list[str], limit_per_op
                 )
             )
     return cases
+
+
+def build_cases_for_specs(device: torch.device, op_keys: list[str], limit_per_op: int) -> list[BenchCase]:
+    sample_ids_by_op = plan_sample_ids_for_specs(
+        op_keys,
+        limit_per_op=limit_per_op,
+        rerun_existing=True,
+    )
+    return build_cases_for_sample_ids(device, sample_ids_by_op)
 
 
 def print_available_ops() -> None:

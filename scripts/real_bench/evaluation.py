@@ -79,6 +79,40 @@ def group_records(records: list[dict[str, Any]]) -> dict[tuple[str, str, str | N
     return grouped
 
 
+def resolve_selected_ops_from_records(
+    records: list[dict[str, Any]],
+    raw_ops: list[str],
+) -> set[str]:
+    available = {str(row["op_name"]) for row in records}
+    tokens: list[str] = []
+    for raw in raw_ops:
+        for piece in raw.split(","):
+            token = piece.strip()
+            if token:
+                tokens.append(token)
+
+    selected: set[str] = set()
+    unknown: list[str] = []
+    for token in tokens:
+        if "::" in token:
+            if token in available:
+                selected.add(token)
+            else:
+                unknown.append(token)
+            continue
+
+        matches = sorted(op_name for op_name in available if op_name == token or op_name.endswith(f"::{token}"))
+        if len(matches) == 1:
+            selected.add(matches[0])
+        elif not matches:
+            unknown.append(token)
+        else:
+            raise ValueError(f"算子别名不唯一: {token} -> {matches}")
+    if unknown:
+        raise ValueError(f"未知算子: {', '.join(unknown)}")
+    return selected
+
+
 def split_group(records: list[dict[str, Any]], seed: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     ordered = sorted(records, key=lambda x: int(x["id"]))
     if len(ordered) < 3:
@@ -184,6 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--device", default=REAL_DEVICE)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--op", action="append", default=[], help="只评估指定算子 key 或 alias，可重复或逗号分隔")
     parser.add_argument(
         "--store-models",
         action="store_true",
@@ -204,6 +239,9 @@ def main() -> int:
     conn = get_connection(args.db_path)
     init_db(conn)
     records = load_real_records(conn, device=args.device)
+    if args.op:
+        selected_ops = resolve_selected_ops_from_records(records, args.op)
+        records = [row for row in records if str(row["op_name"]) in selected_ops]
     grouped = group_records(records)
 
     eligible_reports: list[dict[str, Any]] = []
@@ -261,6 +299,8 @@ def main() -> int:
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"device={args.device}")
+    if args.op:
+        print(f"selected_ops={sorted(selected_ops)}")
     print(f"real_records={len(records)}")
     print(f"evaluated_groups={len(eligible_reports)}")
     print(f"skipped_groups={len(skipped_groups)}")

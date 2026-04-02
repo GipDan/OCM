@@ -1,0 +1,119 @@
+{
+  "device": "NVIDIA_A100_80GB_PCIe",
+  "seed": 42,
+  "overall_metrics": {
+    "mae_ms": 0.034432,
+    "rmse_ms": 0.060258,
+    "mape": 0.154414
+  },
+  "evaluated_groups": [
+    {
+      "op_name": "nn::matmul_row_major_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"K\",\"M\",\"N\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\"]",
+      "count": 30,
+      "feature_order": [
+        "K",
+        "M",
+        "N",
+        "flops_matmul",
+        "is_contiguous",
+        "memory_bytes_matmul",
+        "memory_stride_0",
+        "memory_stride_1"
+      ],
+      "train_ids": [
+        71,
+        72,
+        73,
+        74,
+        121,
+        124,
+        125,
+        126,
+        149,
+        150,
+        151,
+        153,
+        154,
+        155,
+        156,
+        174,
+        175,
+        177,
+        178,
+        179,
+        181,
+        182,
+        183
+      ],
+      "test_ids": [
+        122,
+        123,
+        127,
+        152,
+        157,
+        176,
+        180
+      ],
+      "test_rows": [
+        {
+          "id": 122,
+          "actual_ms": 0.084992,
+          "pred_ms": 0.091002,
+          "abs_err_ms": 0.00601,
+          "ape": 0.070718
+        },
+        {
+          "id": 123,
+          "actual_ms": 0.132096,
+          "pred_ms": 0.138591,
+          "abs_err_ms": 0.006495,
+          "ape": 0.049165
+        },
+        {
+          "id": 127,
+          "actual_ms": 0.392192,
+          "pred_ms": 0.244536,
+          "abs_err_ms": 0.147656,
+          "ape": 0.376489
+        },
+        {
+          "id": 152,
+          "actual_ms": 0.132096,
+          "pred_ms": 0.138591,
+          "abs_err_ms": 0.006495,
+          "ape": 0.049165
+        },
+        {
+          "id": 157,
+          "actual_ms": 0.212992,
+          "pred_ms": 0.206475,
+          "abs_err_ms": 0.006517,
+          "ape": 0.030596
+        },
+        {
+          "id": 176,
+          "actual_ms": 0.07168,
+          "pred_ms": 0.081625,
+          "abs_err_ms": 0.009945,
+          "ape": 0.138738
+        },
+        {
+          "id": 180,
+          "actual_ms": 0.158208,
+          "pred_ms": 0.216115,
+          "abs_err_ms": 0.057907,
+          "ape": 0.366018
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.034432,
+        "rmse_ms": 0.060258,
+        "mape": 0.154413
+      }
+    }
+  ],
+  "skipped_groups": [],
+  "stored_models": []
+}
