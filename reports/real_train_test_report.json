@@ -1,0 +1,599 @@
+{
+  "device": "NVIDIA_A100_80GB_PCIe",
+  "seed": 42,
+  "overall_metrics": {
+    "mae_ms": 0.028407,
+    "rmse_ms": 0.040607,
+    "mape": 0.411295
+  },
+  "evaluated_groups": [
+    {
+      "op_name": "math::reduce_sum_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"axis\",\"is_contiguous\",\"keepdim\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "count": 3,
+      "feature_order": [
+        "C",
+        "H",
+        "N",
+        "W",
+        "axis",
+        "is_contiguous",
+        "keepdim",
+        "memory_stride_0",
+        "memory_stride_1",
+        "memory_stride_2",
+        "memory_stride_3"
+      ],
+      "train_ids": [
+        82,
+        84
+      ],
+      "test_ids": [
+        83
+      ],
+      "test_rows": [
+        {
+          "id": 83,
+          "actual_ms": 0.011264,
+          "pred_ms": 0.011776,
+          "abs_err_ms": 0.000512,
+          "ape": 0.045455
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.000512,
+        "rmse_ms": 0.000512,
+        "mape": 0.045455
+      }
+    },
+    {
+      "op_name": "nn::batch_matmul_row_major_fp16",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"B\",\"K\",\"M\",\"N\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\"]",
+      "count": 3,
+      "feature_order": [
+        "B",
+        "K",
+        "M",
+        "N",
+        "flops_matmul",
+        "is_contiguous",
+        "memory_bytes_matmul",
+        "memory_stride_0",
+        "memory_stride_1",
+        "memory_stride_2"
+      ],
+      "train_ids": [
+        79,
+        81
+      ],
+      "test_ids": [
+        80
+      ],
+      "test_rows": [
+        {
+          "id": 80,
+          "actual_ms": 0.011264,
+          "pred_ms": 0.011555,
+          "abs_err_ms": 0.000291,
+          "ape": 0.025841
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.000291,
+        "rmse_ms": 0.000291,
+        "mape": 0.025841
+      }
+    },
+    {
+      "op_name": "nn::conv2d_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"K\",\"N\",\"R\",\"S\",\"W\",\"dilation_h\",\"dilation_w\",\"groups\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"pad_h\",\"pad_w\",\"stride_h\",\"stride_w\"]",
+      "count": 23,
+      "feature_order": [
+        "C",
+        "H",
+        "K",
+        "N",
+        "R",
+        "S",
+        "W",
+        "dilation_h",
+        "dilation_w",
+        "groups",
+        "is_contiguous",
+        "memory_stride_0",
+        "memory_stride_1",
+        "memory_stride_2",
+        "memory_stride_3",
+        "pad_h",
+        "pad_w",
+        "stride_h",
+        "stride_w"
+      ],
+      "train_ids": [
+        63,
+        64,
+        66,
+        108,
+        110,
+        111,
+        112,
+        113,
+        128,
+        129,
+        130,
+        131,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140
+      ],
+      "test_ids": [
+        65,
+        109,
+        132,
+        133,
+        134
+      ],
+      "test_rows": [
+        {
+          "id": 65,
+          "actual_ms": 0.128,
+          "pred_ms": 0.157464,
+          "abs_err_ms": 0.029464,
+          "ape": 0.230187
+        },
+        {
+          "id": 109,
+          "actual_ms": 0.033792,
+          "pred_ms": 0.077572,
+          "abs_err_ms": 0.04378,
+          "ape": 1.295561
+        },
+        {
+          "id": 132,
+          "actual_ms": 0.27136,
+          "pred_ms": 0.169053,
+          "abs_err_ms": 0.102307,
+          "ape": 0.377016
+        },
+        {
+          "id": 133,
+          "actual_ms": 0.067584,
+          "pred_ms": 0.085645,
+          "abs_err_ms": 0.018061,
+          "ape": 0.267233
+        },
+        {
+          "id": 134,
+          "actual_ms": 0.043008,
+          "pred_ms": 0.106022,
+          "abs_err_ms": 0.063014,
+          "ape": 1.465175
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.051325,
+        "rmse_ms": 0.059243,
+        "mape": 0.727035
+      }
+    },
+    {
+      "op_name": "nn::conv2d_nhwc_fp16",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"K\",\"N\",\"R\",\"S\",\"W\",\"dilation_h\",\"dilation_w\",\"groups\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"pad_h\",\"pad_w\",\"stride_h\",\"stride_w\"]",
+      "count": 19,
+      "feature_order": [
+        "C",
+        "H",
+        "K",
+        "N",
+        "R",
+        "S",
+        "W",
+        "dilation_h",
+        "dilation_w",
+        "groups",
+        "is_contiguous",
+        "memory_stride_0",
+        "memory_stride_1",
+        "memory_stride_2",
+        "memory_stride_3",
+        "pad_h",
+        "pad_w",
+        "stride_h",
+        "stride_w"
+      ],
+      "train_ids": [
+        67,
+        91,
+        92,
+        93,
+        115,
+        116,
+        117,
+        118,
+        120,
+        141,
+        142,
+        145,
+        146,
+        147,
+        148
+      ],
+      "test_ids": [
+        114,
+        119,
+        143,
+        144
+      ],
+      "test_rows": [
+        {
+          "id": 114,
+          "actual_ms": 0.04096,
+          "pred_ms": 0.092473,
+          "abs_err_ms": 0.051513,
+          "ape": 1.25765
+        },
+        {
+          "id": 119,
+          "actual_ms": 0.026624,
+          "pred_ms": 0.039467,
+          "abs_err_ms": 0.012843,
+          "ape": 0.482392
+        },
+        {
+          "id": 143,
+          "actual_ms": 0.129024,
+          "pred_ms": 0.042075,
+          "abs_err_ms": 0.086949,
+          "ape": 0.673895
+        },
+        {
+          "id": 144,
+          "actual_ms": 0.1024,
+          "pred_ms": 0.049927,
+          "abs_err_ms": 0.052473,
+          "ape": 0.512427
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.050944,
+        "rmse_ms": 0.057297,
+        "mape": 0.731591
+      }
+    },
+    {
+      "op_name": "nn::depthwise_conv2d_nhwc_fp16",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"K\",\"N\",\"R\",\"S\",\"W\",\"dilation_h\",\"dilation_w\",\"groups\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"pad_h\",\"pad_w\",\"stride_h\",\"stride_w\"]",
+      "count": 3,
+      "feature_order": [
+        "C",
+        "H",
+        "K",
+        "N",
+        "R",
+        "S",
+        "W",
+        "dilation_h",
+        "dilation_w",
+        "groups",
+        "is_contiguous",
+        "memory_stride_0",
+        "memory_stride_1",
+        "memory_stride_2",
+        "memory_stride_3",
+        "pad_h",
+        "pad_w",
+        "stride_h",
+        "stride_w"
+      ],
+      "train_ids": [
+        68,
+        70
+      ],
+      "test_ids": [
+        69
+      ],
+      "test_rows": [
+        {
+          "id": 69,
+          "actual_ms": 0.011264,
+          "pred_ms": 0.009169,
+          "abs_err_ms": 0.002095,
+          "ape": 0.185959
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.002095,
+        "rmse_ms": 0.002095,
+        "mape": 0.185959
+      }
+    },
+    {
+      "op_name": "nn::matmul_row_major_fp16",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"K\",\"M\",\"N\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\"]",
+      "count": 20,
+      "feature_order": [
+        "K",
+        "M",
+        "N",
+        "flops_matmul",
+        "is_contiguous",
+        "memory_bytes_matmul",
+        "memory_stride_0",
+        "memory_stride_1"
+      ],
+      "train_ids": [
+        75,
+        76,
+        77,
+        78,
+        160,
+        161,
+        162,
+        164,
+        165,
+        166,
+        167,
+        169,
+        170,
+        171,
+        172
+      ],
+      "test_ids": [
+        158,
+        159,
+        163,
+        168,
+        173
+      ],
+      "test_rows": [
+        {
+          "id": 158,
+          "actual_ms": 0.01024,
+          "pred_ms": 0.016297,
+          "abs_err_ms": 0.006057,
+          "ape": 0.591479
+        },
+        {
+          "id": 159,
+          "actual_ms": 0.033792,
+          "pred_ms": 0.028975,
+          "abs_err_ms": 0.004817,
+          "ape": 0.14255
+        },
+        {
+          "id": 163,
+          "actual_ms": 0.029696,
+          "pred_ms": 0.027054,
+          "abs_err_ms": 0.002642,
+          "ape": 0.088976
+        },
+        {
+          "id": 168,
+          "actual_ms": 0.019456,
+          "pred_ms": 0.018288,
+          "abs_err_ms": 0.001168,
+          "ape": 0.060015
+        },
+        {
+          "id": 173,
+          "actual_ms": 0.02048,
+          "pred_ms": 0.021388,
+          "abs_err_ms": 0.000908,
+          "ape": 0.044326
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.003118,
+        "rmse_ms": 0.003716,
+        "mape": 0.185469
+      }
+    },
+    {
+      "op_name": "nn::matmul_row_major_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"K\",\"M\",\"N\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\"]",
+      "count": 20,
+      "feature_order": [
+        "K",
+        "M",
+        "N",
+        "flops_matmul",
+        "is_contiguous",
+        "memory_bytes_matmul",
+        "memory_stride_0",
+        "memory_stride_1"
+      ],
+      "train_ids": [
+        71,
+        72,
+        73,
+        74,
+        123,
+        124,
+        125,
+        127,
+        149,
+        150,
+        151,
+        153,
+        154,
+        155,
+        156
+      ],
+      "test_ids": [
+        121,
+        122,
+        126,
+        152,
+        157
+      ],
+      "test_rows": [
+        {
+          "id": 121,
+          "actual_ms": 0.060928,
+          "pred_ms": 0.04683,
+          "abs_err_ms": 0.014098,
+          "ape": 0.231384
+        },
+        {
+          "id": 122,
+          "actual_ms": 0.084992,
+          "pred_ms": 0.133618,
+          "abs_err_ms": 0.048626,
+          "ape": 0.572123
+        },
+        {
+          "id": 126,
+          "actual_ms": 0.263168,
+          "pred_ms": 0.235781,
+          "abs_err_ms": 0.027387,
+          "ape": 0.104066
+        },
+        {
+          "id": 152,
+          "actual_ms": 0.132096,
+          "pred_ms": 0.086192,
+          "abs_err_ms": 0.045904,
+          "ape": 0.347505
+        },
+        {
+          "id": 157,
+          "actual_ms": 0.212992,
+          "pred_ms": 0.202941,
+          "abs_err_ms": 0.010051,
+          "ape": 0.047188
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.029213,
+        "rmse_ms": 0.033231,
+        "mape": 0.260453
+      }
+    }
+  ],
+  "skipped_groups": [
+    {
+      "op_name": "math::add_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        106
+      ]
+    },
+    {
+      "op_name": "math::mul_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        107
+      ]
+    },
+    {
+      "op_name": "nn::adaptive_avg_pool2d_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"out_h\",\"out_w\"]",
+      "count": 2,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        97,
+        98
+      ]
+    },
+    {
+      "op_name": "nn::avg_pool2d_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"kernel_h\",\"kernel_w\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"pad_h\",\"pad_w\",\"stride_h\",\"stride_w\"]",
+      "count": 2,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        94,
+        105
+      ]
+    },
+    {
+      "op_name": "nn::gelu_row_major_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"M\",\"N\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        102
+      ]
+    },
+    {
+      "op_name": "nn::layernorm_row_major_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"M\",\"N\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"normalized_dim\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        104
+      ]
+    },
+    {
+      "op_name": "nn::max_pool2d_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"kernel_h\",\"kernel_w\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"pad_h\",\"pad_w\",\"stride_h\",\"stride_w\"]",
+      "count": 2,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        95,
+        96
+      ]
+    },
+    {
+      "op_name": "nn::relu_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        100
+      ]
+    },
+    {
+      "op_name": "nn::silu_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        101
+      ]
+    },
+    {
+      "op_name": "nn::softmax_row_major_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"M\",\"N\",\"dim\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        103
+      ]
+    },
+    {
+      "op_name": "vision::resize_nearest_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\",\"out_h\",\"out_w\"]",
+      "count": 1,
+      "reason": "insufficient_samples_for_split",
+      "record_ids": [
+        99
+      ]
+    }
+  ],
+  "stored_models": []
+}
