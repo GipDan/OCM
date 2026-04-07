@@ -35,6 +35,7 @@ class BenchCase:
     run: Callable[[], torch.Tensor]
     output_shape: tuple[int, ...]
     note: str
+    inner_loops: int = 1
 
 
 @dataclass(frozen=True)
@@ -196,12 +197,22 @@ def existing_keys(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
     return keys
 
 
-def benchmark_run(run: Callable[[], torch.Tensor], warmup: int, repeats: int) -> tuple[list[float], torch.Tensor]:
+def benchmark_run(
+    run: Callable[[], torch.Tensor],
+    warmup: int,
+    repeats: int,
+    *,
+    inner_loops: int = 1,
+) -> tuple[list[float], torch.Tensor]:
     import torch
+
+    if inner_loops < 1:
+        raise ValueError("inner_loops 至少为 1")
 
     out: torch.Tensor | None = None
     for _ in range(warmup):
-        out = run()
+        for _ in range(inner_loops):
+            out = run()
     torch.cuda.synchronize()
 
     timings: list[float] = []
@@ -209,10 +220,11 @@ def benchmark_run(run: Callable[[], torch.Tensor], warmup: int, repeats: int) ->
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
-        out = run()
+        for _ in range(inner_loops):
+            out = run()
         end.record()
         torch.cuda.synchronize()
-        timings.append(float(start.elapsed_time(end)))
+        timings.append(float(start.elapsed_time(end)) / inner_loops)
 
     if out is None:
         raise RuntimeError("benchmark 未产生输出")
@@ -255,6 +267,7 @@ def enrich_params(
     case_note: str,
     warmup: int,
     repeats: int,
+    inner_loops: int,
     stats: dict[str, float],
 ) -> dict[str, Any]:
     import torch
@@ -270,6 +283,7 @@ def enrich_params(
         "case_note": case_note,
         "warmup_iters": warmup,
         "measure_iters": repeats,
+        "inner_loops": inner_loops,
         "stats": stats,
         "torch_version": torch.__version__,
         "cuda_version": torch.version.cuda,
@@ -293,12 +307,22 @@ def collect_results(
     skipped: list[tuple[str, int, str]] = []
 
     for case in cases:
-        timings, output = benchmark_run(case.run, warmup=warmup, repeats=repeats)
+        timings, output = benchmark_run(
+            case.run,
+            warmup=warmup,
+            repeats=repeats,
+            inner_loops=case.inner_loops,
+        )
         validate_result_shape(output, case.output_shape)
         stats = summarize_timings(timings)
 
         if stats["cv"] > max_cv:
-            timings, output = benchmark_run(case.run, warmup=max(1, warmup // 2), repeats=repeats * 2)
+            timings, output = benchmark_run(
+                case.run,
+                warmup=max(1, warmup // 2),
+                repeats=repeats * 2,
+                inner_loops=case.inner_loops,
+            )
             validate_result_shape(output, case.output_shape)
             stats = summarize_timings(timings)
 
@@ -315,6 +339,7 @@ def collect_results(
             case_note=case.note,
             warmup=warmup,
             repeats=repeats,
+            inner_loops=case.inner_loops,
             stats=stats,
         )
         results.append(

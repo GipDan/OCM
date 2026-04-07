@@ -445,10 +445,15 @@ def make_binary_nchw_case(
     c: int,
     h: int,
     w: int,
+    non_contiguous: bool = False,
     note: str = "",
 ) -> tuple[str, dict[str, Any], Callable[[], torch.Tensor], tuple[int, ...], str]:
-    x = torch.randn(n, c, h, w, device=device, dtype=dtype).contiguous()
-    y = torch.randn(n, c, h, w, device=device, dtype=dtype).contiguous()
+    if non_contiguous:
+        x = torch.randn(n, c, h, w * 2, device=device, dtype=dtype)[:, :, :, ::2]
+        y = torch.randn(n, c, h, w * 2, device=device, dtype=dtype)[:, :, :, ::2]
+    else:
+        x = torch.randn(n, c, h, w, device=device, dtype=dtype).contiguous()
+        y = torch.randn(n, c, h, w, device=device, dtype=dtype).contiguous()
     params = {
         "N": n,
         "C": c,
@@ -467,7 +472,8 @@ def make_binary_nchw_case(
     else:
         raise ValueError(f"未知 binary op: {op_base}")
 
-    return f"math::{op_base}_nchw_{dtype_name(dtype)}", params, run, (n, c, h, w), note
+    sample_note = note or ("non_contiguous" if non_contiguous else "contiguous")
+    return f"math::{op_base}_nchw_{dtype_name(dtype)}", params, run, (n, c, h, w), sample_note
 
 
 CONV2D_NCHW_FP32_CONFIGS = (
@@ -630,6 +636,72 @@ MAX_POOL_FP32_CONFIGS = (
     dict(pool_kind="max", dtype=torch.float32, n=32, c=64, h=28, w=28, kernel=3, stride_hw=(1, 1), pad_hw=(1, 1), note="max_pool_same"),
 )
 
+ADD_FP32_CONFIGS = (
+    dict(op_base="add", dtype=torch.float32, n=32, c=256, h=56, w=56, non_contiguous=False, note="residual_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=128, h=28, w=28, non_contiguous=False, note="feature_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=64, h=112, w=112, non_contiguous=False, note="large_map_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=4, c=512, h=7, w=7, non_contiguous=False, note="late_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=64, h=56, w=56, non_contiguous=False, note="stage2_residual", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=256, h=14, w=14, non_contiguous=False, note="stage4_residual", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=32, c=128, h=28, w=28, non_contiguous=False, note="stage3_batchy", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=96, h=56, w=56, non_contiguous=False, note="mid_channels_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=2, c=1024, h=7, w=7, non_contiguous=False, note="very_late_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=1, c=64, h=224, w=224, non_contiguous=False, note="input_residual", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=4, c=32, h=112, w=112, non_contiguous=False, note="stem_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=192, h=28, w=28, non_contiguous=False, note="wide_stage3_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=320, h=14, w=14, non_contiguous=False, note="mobile_mid_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=384, h=14, w=14, non_contiguous=False, note="dense_mid_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=48, h=112, w=112, non_contiguous=False, note="small_channel_large_map", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=4, c=768, h=7, w=7, non_contiguous=False, note="late_fusion_add", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=64, h=56, w=56, non_contiguous=True, note="stage2_residual_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=128, h=28, w=28, non_contiguous=True, note="feature_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=256, h=14, w=14, non_contiguous=True, note="stage4_residual_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=4, c=512, h=7, w=7, non_contiguous=True, note="late_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=96, h=56, w=56, non_contiguous=True, note="mid_channels_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=32, c=128, h=28, w=28, non_contiguous=True, note="stage3_batchy_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=1, c=64, h=224, w=224, non_contiguous=True, note="input_residual_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=4, c=32, h=112, w=112, non_contiguous=True, note="stem_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=48, h=112, w=112, non_contiguous=True, note="small_channel_large_map_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=192, h=28, w=28, non_contiguous=True, note="wide_stage3_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=16, c=320, h=14, w=14, non_contiguous=True, note="mobile_mid_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=8, c=384, h=14, w=14, non_contiguous=True, note="dense_mid_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=2, c=1024, h=7, w=7, non_contiguous=True, note="very_late_add_strided", inner_loops=50),
+    dict(op_base="add", dtype=torch.float32, n=4, c=768, h=7, w=7, non_contiguous=True, note="late_fusion_add_strided", inner_loops=50),
+)
+
+MUL_FP32_CONFIGS = (
+    dict(op_base="mul", dtype=torch.float32, n=32, c=256, h=56, w=56, non_contiguous=False, note="elementwise_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=128, h=28, w=28, non_contiguous=False, note="feature_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=64, h=112, w=112, non_contiguous=False, note="large_map_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=4, c=512, h=7, w=7, non_contiguous=False, note="late_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=64, h=56, w=56, non_contiguous=False, note="stage2_gate_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=256, h=14, w=14, non_contiguous=False, note="stage4_gate_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=32, c=128, h=28, w=28, non_contiguous=False, note="stage3_batchy_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=96, h=56, w=56, non_contiguous=False, note="mid_channels_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=2, c=1024, h=7, w=7, non_contiguous=False, note="very_late_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=1, c=64, h=224, w=224, non_contiguous=False, note="input_mask_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=4, c=32, h=112, w=112, non_contiguous=False, note="stem_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=192, h=28, w=28, non_contiguous=False, note="wide_stage3_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=320, h=14, w=14, non_contiguous=False, note="mobile_mid_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=384, h=14, w=14, non_contiguous=False, note="dense_mid_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=48, h=112, w=112, non_contiguous=False, note="small_channel_large_map_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=4, c=768, h=7, w=7, non_contiguous=False, note="late_fusion_mul", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=64, h=56, w=56, non_contiguous=True, note="stage2_gate_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=128, h=28, w=28, non_contiguous=True, note="feature_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=256, h=14, w=14, non_contiguous=True, note="stage4_gate_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=4, c=512, h=7, w=7, non_contiguous=True, note="late_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=96, h=56, w=56, non_contiguous=True, note="mid_channels_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=32, c=128, h=28, w=28, non_contiguous=True, note="stage3_batchy_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=1, c=64, h=224, w=224, non_contiguous=True, note="input_mask_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=4, c=32, h=112, w=112, non_contiguous=True, note="stem_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=48, h=112, w=112, non_contiguous=True, note="small_channel_large_map_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=192, h=28, w=28, non_contiguous=True, note="wide_stage3_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=16, c=320, h=14, w=14, non_contiguous=True, note="mobile_mid_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=8, c=384, h=14, w=14, non_contiguous=True, note="dense_mid_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=2, c=1024, h=7, w=7, non_contiguous=True, note="very_late_mul_strided", inner_loops=50),
+    dict(op_base="mul", dtype=torch.float32, n=4, c=768, h=7, w=7, non_contiguous=True, note="late_fusion_mul_strided", inner_loops=50),
+)
+
 AVAILABLE_SPECS = (
     OperatorSpec("nn::conv2d_nchw_fp32", ("conv2d_nchw_fp32",), make_conv2d_case, CONV2D_NCHW_FP32_CONFIGS),
     OperatorSpec("nn::conv2d_nhwc_fp16", ("conv2d_nhwc_fp16",), make_conv2d_case, CONV2D_NHWC_FP16_CONFIGS),
@@ -695,18 +767,8 @@ AVAILABLE_SPECS = (
         dict(dtype=torch.float32, m=1024, n=3072, note="layernorm_mid"),
         dict(dtype=torch.float32, m=512, n=8192, note="layernorm_long_vector"),
     )),
-    OperatorSpec("math::add_nchw_fp32", ("add_nchw_fp32",), make_binary_nchw_case, (
-        dict(op_base="add", dtype=torch.float32, n=32, c=256, h=56, w=56, note="residual_add"),
-        dict(op_base="add", dtype=torch.float32, n=16, c=128, h=28, w=28, note="feature_add"),
-        dict(op_base="add", dtype=torch.float32, n=8, c=64, h=112, w=112, note="large_map_add"),
-        dict(op_base="add", dtype=torch.float32, n=4, c=512, h=7, w=7, note="late_add"),
-    )),
-    OperatorSpec("math::mul_nchw_fp32", ("mul_nchw_fp32",), make_binary_nchw_case, (
-        dict(op_base="mul", dtype=torch.float32, n=32, c=256, h=56, w=56, note="elementwise_mul"),
-        dict(op_base="mul", dtype=torch.float32, n=16, c=128, h=28, w=28, note="feature_mul"),
-        dict(op_base="mul", dtype=torch.float32, n=8, c=64, h=112, w=112, note="large_map_mul"),
-        dict(op_base="mul", dtype=torch.float32, n=4, c=512, h=7, w=7, note="late_mul"),
-    )),
+    OperatorSpec("math::add_nchw_fp32", ("add_nchw_fp32",), make_binary_nchw_case, ADD_FP32_CONFIGS),
+    OperatorSpec("math::mul_nchw_fp32", ("mul_nchw_fp32",), make_binary_nchw_case, MUL_FP32_CONFIGS),
 )
 
 SPEC_BY_KEY = {spec.key: spec for spec in AVAILABLE_SPECS}
@@ -782,7 +844,8 @@ def build_cases_for_sample_ids(
         for sample_id in sample_ids:
             if sample_id < 1 or sample_id > len(spec.configs):
                 raise ValueError(f"sample_id 超出范围: {op_key}#{sample_id:02d}")
-            cfg = spec.configs[sample_id - 1]
+            cfg = dict(spec.configs[sample_id - 1])
+            inner_loops = int(cfg.pop("inner_loops", 1))
             op_name, params, run, output_shape, note = spec.builder(device, **cfg)
             if op_name != op_key:
                 raise RuntimeError(f"算子注册与 builder 返回不一致: expected={op_key} got={op_name}")
@@ -795,6 +858,7 @@ def build_cases_for_sample_ids(
                     run=run,
                     output_shape=output_shape,
                     note=note or f"sample_{sample_id:02d}",
+                    inner_loops=inner_loops,
                 )
             )
     return cases
