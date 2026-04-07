@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import xgboost as xgb
 
-from ocm.database import get_model_row
+from ocm.database import find_exact_match_record_latency, get_model_row
 from ocm.features import (
     derive_feature_order_key_from_params,
     optional_derived_features,
@@ -58,7 +58,24 @@ def predict_latency_details(
     params: dict[str, Any],
     merge_derived: bool = True,
     feature_order_key: str | None = None,
+    *,
+    use_exact_record_if_match: bool = True,
 ) -> dict[str, Any] | None:
+    """
+    若 `use_exact_record_if_match` 为 True，先在 records 中按与入库相同的 params JSON 精确匹配；
+    命中则直接返回该条实测 latency，否则再尝试 XGBoost 模型。
+    """
+    if use_exact_record_if_match:
+        rec_lat, rec_id = find_exact_match_record_latency(conn, op_name, device, params)
+        if rec_lat is not None and rec_id is not None:
+            return {
+                "predicted_latency_ms": rec_lat,
+                "source": "record",
+                "record_id": rec_id,
+                "op_name": op_name,
+                "device": device,
+            }
+
     row = resolve_model_row_for_prediction(
         conn,
         op_name,
@@ -86,6 +103,7 @@ def predict_latency_details(
     pred = booster.predict(dm)
     return {
         "predicted_latency_ms": float(pred[0]),
+        "source": "model",
         "feature_order_key": row["feature_order_key"],
         "feature_order": feature_order,
         "op_name": row["op_name"],
@@ -100,11 +118,13 @@ def predict_latency(
     params: dict[str, Any],
     merge_derived: bool = True,
     feature_order_key: str | None = None,
+    *,
+    use_exact_record_if_match: bool = True,
 ) -> float | None:
     """
-    Return predicted latency (ms) or None if no model exists.
-    If feature_order_key is None, the function first tries to infer the matching
-    model key from params and only then falls back to the legacy unique-model lookup.
+    Return latency (ms) or None if neither a matching record nor a model exists.
+    By default, if a record exists with the same canonical params JSON as stored
+    at insert time, returns that measured latency; otherwise uses the XGBoost model.
     """
     details = predict_latency_details(
         conn,
@@ -113,6 +133,7 @@ def predict_latency(
         params,
         merge_derived=merge_derived,
         feature_order_key=feature_order_key,
+        use_exact_record_if_match=use_exact_record_if_match,
     )
     if details is None:
         return None

@@ -168,7 +168,7 @@ streamlit run app.py
 | **手动训练** | 不新增记录。选 `(op_name, device)` 与 **样本范围**：全部样本、仅未标注、或某一 `feature_order_key`，再点执行训练。 |
 | **导出 CSV** | 选 `(op_name, device)` 与 **feature_order_key 范围**（全部 / 仅未标注 / 某一 key），下载展平后的 CSV（含 `record_id`、`feature_order_key` 等列）。 |
 | **模型干预** | 粘贴离线训练得到的 `model_payload`（`save_raw('json')` 文本）与 `feature_order`（JSON 数组），覆盖库中对应键下的模型。 |
-| **推理试算** | 填 `op_name`、`device`、`params`；若该设备上有多套模型，需选 **feature_order_key** 变体。支持 params 模板。亦可仅用粘贴的 booster 做「直接预测」试算。 |
+| **推理试算** | 先按 **`params` 与库中记录是否完全一致**（与入库 JSON 规范相同）匹配：命中则**直接返回该条实测 latency**；否则再用模型；无记录且无模型则为 None。多模型时需选 **feature_order_key**。支持 params 模板；「直接预测」为仅粘贴 booster 试算。 |
 | **数据管理** | 按 `op_name` / `device` / 条数上限筛选 **预览**。表格为 **可编辑**：完整展示 **`params`（JSON 字符串）**，改单元格后点 **「应用表格修改」** 批量写回。列 **置空key** 表示将该行 `feature_order_key` 存为 NULL；**删除此行** 勾选后同一按钮会删除对应行。 |
 
 ---
@@ -274,17 +274,26 @@ with open("export.csv", "w", newline="", encoding="utf-8") as f:
 
 #### 3.4 推理
 
+**优先级**：① `records` 中与当前 `params` **规范化 JSON 完全一致**（`json.dumps(..., sort_keys=True, ensure_ascii=False)`，与录入一致）的**最新一条** → 直接返回其 `latency`；② 否则用 **XGBoost 模型**；③ 皆无则 `None`。
+
 ```python
-from ocm.inference import predict_latency
+from ocm.inference import predict_latency, predict_latency_details
 
 pred = predict_latency(
     conn,
     "nn::matmul_row_major_fp32",
     "GPU",
     {"M": 200, "N": 200, "K": 400, "is_contiguous": True, "memory_stride": [400, 1]},
-    feature_order_key=fk,   # 与训练保存的模型一致；若该 op+device 只有一个模型，可省略由库自动选
+    feature_order_key=fk,   # 仅影响模型分支；命中实测记录时忽略
 )
-# pred 为 float（ms）或 None（无模型或无法唯一确定变体时）
+# pred 为 float（ms）或 None
+
+# 需要区分「实测」与「模型」时用：
+d = predict_latency_details(conn, "nn::matmul_row_major_fp32", "GPU", params_dict)
+# d["source"] == "record" 或 "model"；record 时有 d["record_id"]
+
+# 强制不走实测记录、只用模型（调试可用）：
+predict_latency(..., use_exact_record_if_match=False)
 ```
 
 **完整串联示例（与 Web 共用同一库文件时路径一致即可）**
@@ -312,7 +321,7 @@ conn.close()
 "
 ```
 
-推理时若 **没有匹配的模型**（或同一 `(op_name, device)` 下有多模型却未指定 `feature_order_key`），`predict_latency` 返回 **`None`**，可回退到真实 Benchmark。
+若 **无完全相同的 params 记录**，且 **无可用模型**（或有多模型却未指定 `feature_order_key`），`predict_latency` 返回 **`None`**，可回退到真实 Benchmark。
 
 **其它 API**：params 模板（`list_param_templates`、`save_param_template` 等）；记录维护（`list_records`、`update_record`、`delete_record`）；多模型列表（`list_models_for_op_device`）。详见 `ocm/__init__.py` 导出列表。
 

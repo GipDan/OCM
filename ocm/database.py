@@ -143,6 +143,30 @@ def insert_record(
     return int(cur.lastrowid), fk
 
 
+def find_exact_match_record_latency(
+    conn: sqlite3.Connection,
+    op_name: str,
+    device: str,
+    params: dict[str, Any],
+) -> tuple[float | None, int | None]:
+    """
+    若存在与插入时相同规范 JSON 的 params（sort_keys + ensure_ascii），
+    返回最新一条（id 最大）的 latency 与 record id；否则 (None, None)。
+    """
+    blob = json.dumps(params, ensure_ascii=False, sort_keys=True)
+    r = conn.execute(
+        """
+        SELECT id, latency FROM records
+        WHERE op_name = ? AND device = ? AND params = ?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (op_name, device, blob),
+    ).fetchone()
+    if r is None:
+        return None, None
+    return float(r["latency"]), int(r["id"])
+
+
 def fetch_records(
     conn: sqlite3.Connection,
     op_name: str,

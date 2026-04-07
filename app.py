@@ -35,7 +35,7 @@ from ocm.database import (  # noqa: E402
     update_record,
     upsert_model,
 )
-from ocm.inference import predict_latency, predict_with_booster_json  # noqa: E402
+from ocm.inference import predict_latency_details, predict_with_booster_json  # noqa: E402
 from ocm.train import fit_and_store_model  # noqa: E402
 from ocm.workflow import add_record_maybe_autofit  # noqa: E402
 
@@ -333,7 +333,11 @@ def main() -> None:
                 st.error(str(e))
 
     with tab5:
-        st.markdown("编译器侧推理：查询 `models`，有则 `predict`，无则返回 None。")
+        st.markdown(
+            "推理：**若 `records` 中存在与当前 params（JSON 与入库时一致）完全相同的样本，"
+            "直接返回该条实测 latency**；否则再使用 `models` 中的 XGBoost 预测；"
+            "两者皆无时为 None。"
+        )
         op_p = st.text_input("op_name", value="nn::conv2d_nchw_fp32", key="p_op")
         dev_p = st.text_input("device", value="NVIDIA_RTX_4090", key="p_dev")
 
@@ -395,17 +399,28 @@ def main() -> None:
         if st.button("预测"):
             try:
                 pdict = json.loads(st.session_state.infer_params)
-                pred = predict_latency(
+                details = predict_latency_details(
                     conn,
                     op_p,
                     dev_p,
                     pdict,
                     feature_order_key=pred_fok,
                 )
-                if pred is None:
-                    st.info("无模型：返回 None（可回退到真实 Benchmark）。")
+                if details is None:
+                    st.info("无匹配记录且无可用模型：返回 None（可回退到真实 Benchmark）。")
                 else:
-                    st.metric("预测 latency (ms)", f"{pred:.6f}")
+                    src = details.get("source", "model")
+                    lat = float(details["predicted_latency_ms"])
+                    st.metric("latency (ms)", f"{lat:.6f}")
+                    if src == "record":
+                        st.success(
+                            f"来源：**数据库实测记录**（id={details.get('record_id')}），"
+                            "未使用模型。"
+                        )
+                    else:
+                        st.caption(
+                            f"来源：**XGBoost 模型**（feature_order_key=`{details.get('feature_order_key', '')}`）"
+                        )
             except Exception as e:
                 st.error(str(e))
 

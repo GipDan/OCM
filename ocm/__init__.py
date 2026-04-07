@@ -17,6 +17,7 @@ from ocm.database import (
     list_record_export_keys,
     list_records,
     fetch_records,
+    find_exact_match_record_latency,
     save_param_template,
     update_record,
     upsert_model,
@@ -28,7 +29,7 @@ from ocm.features import (
 )
 from ocm.keys import make_feature_order_key
 from ocm.train import MIN_SAMPLES_DEFAULT, fit_and_store_model
-from ocm.inference import predict_latency
+from ocm.inference import predict_latency, predict_latency_details
 from ocm.workflow import add_record_maybe_autofit
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "list_record_export_keys",
     "list_models_for_op_device",
     "fetch_records",
+    "find_exact_match_record_latency",
     "get_model_row",
     "upsert_model",
     "export_filename_suffix",
@@ -58,5 +60,6 @@ __all__ = [
     "MIN_SAMPLES_DEFAULT",
     "fit_and_store_model",
     "predict_latency",
+    "predict_latency_details",
     "add_record_maybe_autofit",
 ]
