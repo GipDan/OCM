@@ -1,0 +1,127 @@
+{
+  "device": "NVIDIA_A100_80GB_PCIe",
+  "seed": 42,
+  "overall_metrics": {
+    "mae_ms": 0.010445,
+    "rmse_ms": 0.012986,
+    "mape": 0.787597
+  },
+  "evaluated_groups": [
+    {
+      "op_name": "math::add_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "count": 29,
+      "feature_order": [
+        "C",
+        "H",
+        "N",
+        "W",
+        "is_contiguous",
+        "memory_stride_0",
+        "memory_stride_1",
+        "memory_stride_2",
+        "memory_stride_3"
+      ],
+      "train_ids": [
+        106,
+        194,
+        195,
+        196,
+        197,
+        200,
+        201,
+        202,
+        204,
+        205,
+        206,
+        208,
+        209,
+        210,
+        212,
+        213,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221
+      ],
+      "test_ids": [
+        198,
+        199,
+        203,
+        207,
+        211,
+        214,
+        215
+      ],
+      "test_rows": [
+        {
+          "id": 198,
+          "actual_ms": 0.005714,
+          "pred_ms": 0.008277,
+          "abs_err_ms": 0.002563,
+          "ape": 0.448544
+        },
+        {
+          "id": 199,
+          "actual_ms": 0.007291,
+          "pred_ms": 0.01814,
+          "abs_err_ms": 0.010849,
+          "ape": 1.487979
+        },
+        {
+          "id": 203,
+          "actual_ms": 0.005714,
+          "pred_ms": 0.008277,
+          "abs_err_ms": 0.002563,
+          "ape": 0.448544
+        },
+        {
+          "id": 207,
+          "actual_ms": 0.005775,
+          "pred_ms": 0.010048,
+          "abs_err_ms": 0.004273,
+          "ape": 0.73994
+        },
+        {
+          "id": 211,
+          "actual_ms": 0.006892,
+          "pred_ms": 0.016834,
+          "abs_err_ms": 0.009942,
+          "ape": 1.442521
+        },
+        {
+          "id": 214,
+          "actual_ms": 0.045425,
+          "pred_ms": 0.021599,
+          "abs_err_ms": 0.023826,
+          "ape": 0.524521
+        },
+        {
+          "id": 215,
+          "actual_ms": 0.045353,
+          "pred_ms": 0.026254,
+          "abs_err_ms": 0.019099,
+          "ape": 0.421114
+        }
+      ],
+      "metrics": {
+        "mae_ms": 0.010445,
+        "rmse_ms": 0.012986,
+        "mape": 0.787595
+      }
+    }
+  ],
+  "skipped_groups": [],
+  "stored_models": [
+    {
+      "op_name": "math::add_nchw_fp32",
+      "device": "NVIDIA_A100_80GB_PCIe",
+      "feature_order_key": "[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]",
+      "ok": true,
+      "message": "已训练并保存模型：样本 29，特征 9，feature_order_key=[\"C\",\"H\",\"N\",\"W\",\"is_contiguous\",\"memory_stride_0\",\"memory_stride_1\",\"memory_stride_2\",\"memory_stride_3\"]"
+    }
+  ]
+}
