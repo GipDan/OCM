@@ -6,14 +6,23 @@ import sqlite3
 from typing import Any
 
 import numpy as np
-import xgboost as xgb
 
-from ocm.database import find_exact_match_record_latency, get_model_row
+from ocm.database import (
+    find_exact_match_record_latency,
+    get_group_latency_stats,
+    get_model_row,
+)
 from ocm.features import (
     derive_feature_order_key_from_params,
     optional_derived_features,
     params_to_feature_row,
 )
+
+
+def _load_xgboost():
+    import xgboost as xgb
+
+    return xgb
 
 
 def _merge_derived(params: dict[str, Any], merge_derived: bool) -> dict[str, Any]:
@@ -60,6 +69,7 @@ def predict_latency_details(
     feature_order_key: str | None = None,
     *,
     use_exact_record_if_match: bool = True,
+    use_stats_fallback: bool = True,
 ) -> dict[str, Any] | None:
     """
     若 `use_exact_record_if_match` 为 True，先在 records 中按与入库相同的 params JSON 精确匹配；
@@ -84,30 +94,55 @@ def predict_latency_details(
         merge_derived=merge_derived,
         feature_order_key=feature_order_key,
     )
-    if row is None:
+    if row is not None:
+        p = _merge_derived(params, merge_derived=merge_derived)
+        feature_order: list[str] = row["feature_order"]
+        vec = params_to_feature_row(p, feature_order)
+        X = np.asarray([vec], dtype=np.float64)
+
+        xgb = _load_xgboost()
+        booster = xgb.Booster()
+        payload = row["model_payload"]
+        if isinstance(payload, str):
+            booster.load_model(bytearray(payload.encode("utf-8")))
+        else:
+            booster.load_model(bytearray(payload))
+
+        dm = xgb.DMatrix(X, feature_names=feature_order)
+        pred = booster.predict(dm)
+        return {
+            "predicted_latency_ms": float(pred[0]),
+            "source": "model",
+            "feature_order_key": row["feature_order_key"],
+            "feature_order": feature_order,
+            "op_name": row["op_name"],
+            "device": row["device"],
+        }
+
+    if not use_stats_fallback:
         return None
 
-    p = _merge_derived(params, merge_derived=merge_derived)
-    feature_order: list[str] = row["feature_order"]
-    vec = params_to_feature_row(p, feature_order)
-    X = np.asarray([vec], dtype=np.float64)
-
-    booster = xgb.Booster()
-    payload = row["model_payload"]
-    if isinstance(payload, str):
-        booster.load_model(bytearray(payload.encode("utf-8")))
-    else:
-        booster.load_model(bytearray(payload))
-
-    dm = xgb.DMatrix(X, feature_names=feature_order)
-    pred = booster.predict(dm)
+    inferred_key = feature_order_key or derive_feature_order_key_from_params(
+        params,
+        merge_derived=merge_derived,
+    )
+    stats = get_group_latency_stats(
+        conn,
+        op_name,
+        device,
+        inferred_key,
+    )
+    if stats is None:
+        stats = get_group_latency_stats(conn, op_name, device, None)
+    if stats is None:
+        return None
     return {
-        "predicted_latency_ms": float(pred[0]),
-        "source": "model",
-        "feature_order_key": row["feature_order_key"],
-        "feature_order": feature_order,
-        "op_name": row["op_name"],
-        "device": row["device"],
+        "predicted_latency_ms": float(stats["p50_ms"]),
+        "source": "stats",
+        "feature_order_key": stats["feature_order_key"],
+        "op_name": op_name,
+        "device": device,
+        "stats": stats,
     }
 
 
@@ -120,6 +155,7 @@ def predict_latency(
     feature_order_key: str | None = None,
     *,
     use_exact_record_if_match: bool = True,
+    use_stats_fallback: bool = True,
 ) -> float | None:
     """
     Return latency (ms) or None if neither a matching record nor a model exists.
@@ -134,6 +170,7 @@ def predict_latency(
         merge_derived=merge_derived,
         feature_order_key=feature_order_key,
         use_exact_record_if_match=use_exact_record_if_match,
+        use_stats_fallback=use_stats_fallback,
     )
     if details is None:
         return None
@@ -150,6 +187,7 @@ def predict_with_booster_json(
     p = _merge_derived(params, merge_derived=merge_derived)
     vec = params_to_feature_row(p, feature_order)
     X = np.asarray([vec], dtype=np.float64)
+    xgb = _load_xgboost()
     booster = xgb.Booster()
     booster.load_model(bytearray(model_payload.encode("utf-8")))
     dm = xgb.DMatrix(X, feature_names=feature_order)

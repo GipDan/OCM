@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from statistics import mean
 from typing import Any
 
 from ocm.keys import make_feature_order_key
@@ -15,7 +16,7 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "ocm.sqlite3
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path else DEFAULT_DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -165,6 +166,85 @@ def find_exact_match_record_latency(
     if r is None:
         return None, None
     return float(r["latency"]), int(r["id"])
+
+
+def count_records_for_group(
+    conn: sqlite3.Connection,
+    op_name: str,
+    device: str,
+    feature_order_key: str | None = None,
+) -> int:
+    if feature_order_key is None:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM records WHERE op_name = ? AND device = ?",
+            (op_name, device),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS cnt FROM records
+            WHERE op_name = ? AND device = ? AND feature_order_key = ?
+            """,
+            (op_name, device, feature_order_key),
+        ).fetchone()
+    return int(row["cnt"]) if row is not None else 0
+
+
+def get_group_latency_stats(
+    conn: sqlite3.Connection,
+    op_name: str,
+    device: str,
+    feature_order_key: str | None = None,
+) -> dict[str, Any] | None:
+    """
+    Aggregate latency summary for one record group.
+    If feature_order_key is None, summarize all records for (op_name, device).
+    """
+    if feature_order_key is None:
+        rows = conn.execute(
+            """
+            SELECT id, latency FROM records
+            WHERE op_name = ? AND device = ?
+            ORDER BY latency
+            """,
+            (op_name, device),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, latency FROM records
+            WHERE op_name = ? AND device = ? AND feature_order_key = ?
+            ORDER BY latency
+            """,
+            (op_name, device, feature_order_key),
+        ).fetchall()
+    if not rows:
+        return None
+
+    latencies = [float(row["latency"]) for row in rows]
+    ids = [int(row["id"]) for row in rows]
+
+    def percentile(sorted_values: list[float], p: float) -> float:
+        if not sorted_values:
+            return 0.0
+        if len(sorted_values) == 1:
+            return float(sorted_values[0])
+        rank = (len(sorted_values) - 1) * p
+        lo = int(rank)
+        hi = min(lo + 1, len(sorted_values) - 1)
+        frac = rank - lo
+        return float(sorted_values[lo] * (1.0 - frac) + sorted_values[hi] * frac)
+
+    return {
+        "count": len(latencies),
+        "record_ids": ids,
+        "feature_order_key": feature_order_key,
+        "min_ms": round(min(latencies), 6),
+        "max_ms": round(max(latencies), 6),
+        "mean_ms": round(mean(latencies), 6),
+        "p50_ms": round(percentile(latencies, 0.50), 6),
+        "p90_ms": round(percentile(latencies, 0.90), 6),
+    }
 
 
 def fetch_records(
